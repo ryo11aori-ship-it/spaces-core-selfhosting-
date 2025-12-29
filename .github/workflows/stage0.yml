@@ -50,7 +50,7 @@ jobs:
             echo "❌ Stage 4 failed"
             exit 1
           fi
-
+python3 tools/gen_compiler.py < /dev/null > spaces/self/compiler.spaces
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
