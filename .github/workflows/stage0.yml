@@ -75,14 +75,34 @@ jobs:
           python3 tools/generator.py "[+++++]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > loop_test.spaces
           ./bin/encoder loop_test.spaces > loop_test.bin
 
-      - name: Run Full Self-Interpreter
+            - name: Run Full Self-Interpreter (with diagnostics)
         run: |
-          ./bin/ref_vm spaces/self/full_interp.spaces < loop_test.bin > output.txt
-          
-          cat output.txt
-          if grep -q "A" output.txt; then
-            echo "🎉 STAGE 3 PASSED: Loop Logic Verified (Robust)!"
+          set -xuo pipefail
+
+          # show interpreter source length + hexdump few bytes (debug)
+          echo "=== full_interp.spaces (first 512 bytes, hexdump) ==="
+          head -c 512 spaces/self/full_interp.spaces | hexdump -C || true
+          echo "=== loop_test.bin (first 64 bytes) ==="
+          head -c 64 loop_test.bin | hexdump -C || true
+
+          # run interpreter and capture both stdout/stderr
+          ./bin/ref_vm spaces/self/full_interp.spaces < loop_test.bin |& tee output.txt || true
+
+          echo "=== output.txt (raw) ==="
+          cat output.txt || true
+          echo "=== output.txt (hex) ==="
+          head -c 128 output.txt | hexdump -C || true
+
+          # Basic sanity checks (improve granularity of failure reasons)
+          if [ -s output.txt ]; then
+            # check literal A
+            if grep -q "A" output.txt; then
+              echo "🎉 STAGE 3 PASSED: Loop Logic Verified (Robust)!"
+            else
+              echo "❌ Failed: output present but missing 'A' — likely interpreter decoded program incorrectly."
+              exit 1
+            fi
           else
-            echo "❌ Failed. Loop skip logic broken."
+            echo "❌ Failed: no output produced — maybe interpreter never executed output, or input consumed incorrectly."
             exit 1
           fi
