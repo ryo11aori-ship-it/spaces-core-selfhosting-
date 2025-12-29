@@ -2,9 +2,8 @@ import sys
 
 # Stage 3: Robust Linear-Check Interpreter with Safe Scan
 # Features:
-# - Linear If-Chain for decoding (1..8) to avoid nesting hell.
-# - Safety break on EOF (0) in Scan loop.
-# - Flattened indentation to prevent Python syntax errors.
+# - Python indentation is strictly flattened to prevent Syntax Errors.
+# - Safe scan for '[' (Data=0) until ']' (8) or EOF (0).
 
 def main():
     bf = []
@@ -51,8 +50,8 @@ def main():
         emit(']')
         move_val(tmp, src)
 
-    IDX_OP   = 0
-    IDX_TMP  = 1 
+    IDX_OP = 0
+    IDX_TMP = 1 
     IDX_FLAG = 2 
     IDX_DATA = 3
     IDX_EXTRA = 4
@@ -77,41 +76,33 @@ def main():
     # --- Helper to generate check block ---
     def check_opcode_and_act(action_func):
         # Check if Done_Flag (IDX_FLAG) == 0
-        # Invert Flag into IDX_EXTRA: 1 if Not Done, 0 if Done
         clear(IDX_EXTRA); emit('+')
         goto(IDX_FLAG); emit('['); goto(IDX_EXTRA); emit('-'); goto(IDX_FLAG); emit('[-]+'); emit(']')
         
         goto(IDX_EXTRA)
         emit('[')
-        # { Not Done Yet }
-            
-            # Move Temp (Current Op Value) -> IDX_EXTRA_2
-            move_val(IDX_TMP, IDX_EXTRA_2)
-            
-            # Decrement Extra2 (The check)
-            goto(IDX_EXTRA_2); emit('-')
-            
-            # Check if 0 (Match)
-            # Set Match=1
-            clear(IDX_IS_MATCH); emit('+')
-            
-            goto(IDX_EXTRA_2); emit('[')
-                 # Not Zero
-                 goto(IDX_IS_MATCH); emit('-') # Match=0
-                 emit('-') # Decrement for next pass
-                 goto(IDX_TMP); emit('+') # Restore remaining to Temp
-                 goto(IDX_EXTRA_2)
-            emit(']')
-            
-            goto(IDX_IS_MATCH)
-            emit('[')
-                 # MATCHED!
-                 action_func()
-                 goto(IDX_FLAG); emit('+') # Set Done_Flag=1
-                 goto(IDX_IS_MATCH); emit('-')
-            emit(']')
+        # Not Done Yet
+        move_val(IDX_TMP, IDX_EXTRA_2)
+        goto(IDX_EXTRA_2); emit('-')
         
-        clear(IDX_EXTRA) # Exit Not Done block
+        # Check if 0 (Match)
+        clear(IDX_IS_MATCH); emit('+')
+        goto(IDX_EXTRA_2); emit('[')
+        goto(IDX_IS_MATCH); emit('-') # Match=0
+        emit('-') # Decrement for next pass
+        goto(IDX_TMP); emit('+') # Restore remaining
+        goto(IDX_EXTRA_2)
+        emit(']')
+        
+        goto(IDX_IS_MATCH)
+        emit('[')
+        # MATCHED!
+        action_func()
+        goto(IDX_FLAG); emit('+') # Set Done_Flag=1
+        goto(IDX_IS_MATCH); emit('-')
+        emit(']')
+        
+        clear(IDX_EXTRA)
         emit(']')
 
     # --- Define Actions ---
@@ -126,48 +117,35 @@ def main():
         
     def act_scan():
         # Scan until ] (8) or 0 (EOF)
-        # Set ScanFlag = 1
         clear(IDX_SCAN_FLAG); emit('+')
-        
         goto(IDX_SCAN_FLAG)
         emit('[')
-             # Read char -> IDX_CHAR
-             goto(IDX_CHAR); emit(',')
-             
-             # Check if 0 (EOF) - Safety Break
-             copy_val(IDX_CHAR, IDX_EXTRA, IDX_EXTRA_2)
-             
-             # Invert into Match (1 if 0, 0 if !0)
-             clear(IDX_IS_MATCH); emit('+')
-             goto(IDX_EXTRA); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA); emit('[-]'); emit(']')
-             
-             goto(IDX_IS_MATCH); emit('[')
-                  # Is EOF (0). Clear ScanFlag to Stop.
-                  clear(IDX_SCAN_FLAG)
-                  clear(IDX_IS_MATCH)
-             emit(']')
-             
-             # If Still Scanning, Check if 8 (])
-             copy_val(IDX_SCAN_FLAG, IDX_EXTRA, IDX_EXTRA_2) # Copy Flag
-             goto(IDX_EXTRA); emit('[')
-                  # Check 8
-                  copy_val(IDX_CHAR, IDX_EXTRA_2, IDX_EXTRA)
-                  goto(IDX_EXTRA_2); emit('-'*8)
-                  
-                  # Check if 0
-                  clear(IDX_IS_MATCH); emit('+')
-                  goto(IDX_EXTRA_2); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA_2); emit('[-]'); emit(']')
-                  
-                  goto(IDX_IS_MATCH); emit('[')
-                       # Is 8 (]). Clear ScanFlag.
-                       clear(IDX_SCAN_FLAG)
-                       clear(IDX_IS_MATCH)
-                  emit(']')
-                  
-                  clear(IDX_EXTRA)
-             emit(']')
-             
-        goto(IDX_SCAN_FLAG); emit(']') # Loop
+        goto(IDX_CHAR); emit(',')
+        
+        # Check if 0 (EOF)
+        copy_val(IDX_CHAR, IDX_EXTRA, IDX_EXTRA_2)
+        clear(IDX_IS_MATCH); emit('+')
+        goto(IDX_EXTRA); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA); emit('[-]'); emit(']')
+        
+        goto(IDX_IS_MATCH); emit('[')
+        clear(IDX_SCAN_FLAG) # EOF found, Stop
+        clear(IDX_IS_MATCH)
+        emit(']')
+        
+        # Check if 8 (])
+        copy_val(IDX_SCAN_FLAG, IDX_EXTRA, IDX_EXTRA_2)
+        goto(IDX_EXTRA); emit('[')
+        copy_val(IDX_CHAR, IDX_EXTRA_2, IDX_EXTRA)
+        goto(IDX_EXTRA_2); emit('-'*8)
+        clear(IDX_IS_MATCH); emit('+')
+        goto(IDX_EXTRA_2); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA_2); emit('[-]'); emit(']')
+        goto(IDX_IS_MATCH); emit('[')
+        clear(IDX_SCAN_FLAG) # ] found, Stop
+        clear(IDX_IS_MATCH)
+        emit(']')
+        clear(IDX_EXTRA)
+        emit(']')
+        goto(IDX_SCAN_FLAG); emit(']')
 
     # --- Generate Checks 1..8 ---
     check_opcode_and_act(lambda: None) # 1
