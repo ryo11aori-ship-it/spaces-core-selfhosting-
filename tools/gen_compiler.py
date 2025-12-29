@@ -1,7 +1,7 @@
 import sys
 
-# Stage 4: Self-Hosted Compiler (Source -> Binary)
-# Fixed: Correctly handles buffered BF strings during mapping.
+# Stage 4: Self-Hosted Compiler (BF Source -> Spaces Binary)
+# Fixed: Correctly reads ASCII chars and outputs binary opcodes.
 
 def main():
     bf = []
@@ -26,6 +26,7 @@ def main():
     emit('[') # While not EOF
 
     # check_and_out function
+    # Cell 0: Char, Cell 1: Temp, Cell 2: Work, Cell 3: Flag
     def check_and_out(char_code_delta, out_val):
         # Copy Cell 0 -> Cell 2 using Cell 1 as temp
         emit('>[-]>[-]<<') 
@@ -49,7 +50,7 @@ def main():
         emit(']')
         emit('<<<') # Back to Cell 0
         
-    # Check Chain (Offsets)
+    # Check Chain (Offsets based on ASCII)
     # + (43)
     check_and_out(43, 3)
     # , (44) -> Delta 1
@@ -78,7 +79,6 @@ def main():
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     
-    # FIX: Join the list first so we iterate characters, not strings
     full_bf = "".join(bf)
     print("".join([mapping.get(c, '') for c in full_bf]), end='')
 
