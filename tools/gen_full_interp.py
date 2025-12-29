@@ -8,164 +8,84 @@ def main():
     def l(c): return "[" + c + "]"
     def clr(): return "[-]"
 
-    # --- Full Interpreter Logic (dbfi-based approach) ---
-    # Memory Layout: [Code Area] [Separator 0] [Data Area]
-    # We read the entire binary input first.
+    # --- Full Interpreter Logic ---
+    # Memory Layout: [Code...] 0 [Data...]
+    # Start: Code is loaded, pointer at the end of Code.
     
     bf = ""
-    
     # 1. Skip Header (S, P, A)
-    bf += "," + "," + ","
+    bf += ">" + ","*3 
     
-    # 2. Read Code into Memory (until EOF=0)
-    # Since our vm returns 0 on EOF, we just read until 0.
-    bf += ">>>" + "," + l(">" + "," ) 
+    # 2. Read Code (until 0)
+    bf += ">>>+[,[>]+<[-]<]>>"
     
-    # 3. Setup Execution
-    # Pointer is at the end of Code. 
-    # Structure: [0] [Code...] [0] [Data...]
-    # We need to map our binary opcodes (1-8) to executable logic.
+    # 3. Execution Loop
+    # Go to start of Code
+    bf += "[[>]+<[-]<]>"
     
-    # Reset pointer to start of Code
-    bf += "<" + l("<") 
+    # Copy Opcode to check
+    bf += "[[>+>+<<-]>>[<<+>>-]<" 
     
-    # Start Execution Loop
-    bf += l(
-        # Current Cell is Opcode. 
-        # We need to preserve it to check against multiple values.
-        # Temp layout: [Op] [Copy]
-        
-        # --- EXECUTE OP ---
-        # 0x01 (>)
-        s(1) + l(
-            s(1) + l(
-                s(1) + l(
-                    s(1) + l(
-                        s(1) + l(
-                            s(1) + l(
-                                s(1) + l(
-                                    s(1) + l(
-                                        # Unknown Op -> clear
-                                        clr()
-                                    )
-                                    # Case 0x08 (])
-                                    # Logic: If Data!=0, Scan Back to [
-                                    # Move to Data
-                                    + m(1) + l( m(1) ) + m(1) 
-                                    + l( 
-                                        # Data!=0, need to jump back
-                                        # Go back to Code
-                                        m(-1) + l( m(-1) ) + m(-1)
-                                        # Scan back loop
-                                        + l(
-                                            m(-1) 
-                                            # If ] add 1 to counter, If [ sub 1
-                                            # This part is tricky in pure BF without extra vars.
-                                            # Using a simplified scan for now:
-                                            # Just scan back until matching bracket balance.
-                                            # For this bootstrap proof, we assume well-formed code.
-                                        )
-                                        # (Complex logic omitted for brevity in this chat, 
-                                        #  using simplified 'Skip' logic below for robustness)
-                                    ) 
-                                    # Return to Code
-                                    + m(-1) + l( m(-1) ) + m(-1)
-                                    + clr()
-                                )
-                                # Case 0x07 ([)
-                                + clr()
-                            )
-                            # Case 0x06 (,)
-                            + m(1) + l(m(1)) + m(1) + "," 
-                            + l(m(1)+","+m(-1)+l(clr())+m(1)) # EOF(0) check? No, VM handles it.
-                            + m(-1) + l(m(-1)) + m(-1) + clr()
-                        )
-                        # Case 0x05 (.)
-                        + m(1) + l(m(1)) + m(1) + "." + m(-1) + l(m(-1)) + m(-1) + clr()
-                    )
-                    # Case 0x04 (-)
-                    + m(1) + l(m(1)) + m(1) + s(1) + m(-1) + l(m(-1)) + m(-1) + clr()
-                )
-                # Case 0x03 (+)
-                + m(1) + l(m(1)) + m(1) + a(1) + m(-1) + l(m(-1)) + m(-1) + clr()
-            )
-            # Case 0x02 (<)
-            # Data Pointer Logic: We use '0's as separators. 
-            # Simplified: Just move the data separator left? 
-            # No, standard BF data model is easier:
-            # We shift the whole data block? No.
-            
-            # === SIMPLIFIED STRATEGY FOR STAGE 3 ===
-            # Because writing a robust BF interpreter in Python-string-BF is error-prone
-            # and debugging "infinite loop" in CI is painful, 
-            # we will generate a 'Direct Translation' Interpreter.
-            # Instead of interpreting at runtime, let's map:
-            # Opcode -> Action directly on the tape.
-            # BUT, that is a Compiler, not an Interpreter.
-            #
-            # Reverting to: The Standard "DBFI" Logic string.
-            # This is a proven, shortest known interpreter.
-            # We just need to adjust input mapping.
-            # Standard BF: +-,.><[]
-            # Our Binary:  03 04 05 06 01 02 07 08
-            + clr()
-        )
-        + clr()
-    )
-
-    # -------------------------------------------------------------
-    # 実用的な実装（dbfiの再実装）
-    # -------------------------------------------------------------
-    # このスクリプトは、DBFI (Daniel B. Cristofani's interpreter) のロジックを
-    # 今回のバイナリ仕様 (0x01-0x08) に合わせて変換したものを出力します。
-    # -------------------------------------------------------------
+    # --- DECODE NEST ---
+    # Structure: s + l( next_check + action )
+    # If match, loop skipped, action executed.
+    # 8 opcodes to check: 0x01..0x08
     
-    # 1. Header Skip
-    code = ">" + ","*3 
-    
-    # 2. Main Loop
-    # [CodeArray] [Separator] [DataArray]
-    # Layout:
-    # 0 0 [Code 1] [Code 2] ... [Code N] 0 [Data 1] 0 0
-    #                                    ^ Flag
-    
-    # Setup: Read code
-    code += ">>>+[,[>]+<[-]<]>>"  # Read until 0
-    
-    # DBFI logic adaptation for Binary Opcodes:
-    # We need to subtract to match standard BF ASCII, OR rewrite the logic.
-    # Rewriting logic for 1..8 is easier.
-    
-    # Execution Loop
-    code += "[[>]+<[-]<]>" # Go to start of Code
-    code += "[[>+>+<<-]>>[<<+>>-]<" # Copy Opcode
-    
-    # --- DECODE ---
     # 0x01 (>)
-    code += "s" + l("s"+l("s"+l("s"+l("s"+l("s"+l("s"+l(
-        # 0x08 (])
-        "m<[<]>[>]>m"
-    )+  # 0x07 ([)
-        "m<[<]>+>[>]>m" 
-    )+  # 0x06 (,)
-        "m,m"
-    )+  # 0x05 (.)
-        "m.m"
-    )+  # 0x04 (-)
-        "msm"
-    )+  # 0x03 (+)
-        "mam"
-    )+  # 0x02 (<)
-        "<"
-    )+  # 0x01 (>)
-        ">"
-    )+  # Next Instruction
-    ">>]"
-
-    # Replace macros
-    final_bf = code.replace("m", "[<]>[>]>").replace("a","+").replace("s","-").replace("l","[")
+    bf += "s" + l(
+        # 0x02 (<)
+        "s" + l(
+            # 0x03 (+)
+            "s" + l(
+                # 0x04 (-)
+                "s" + l(
+                    # 0x05 (.)
+                    "s" + l(
+                        # 0x06 (,)
+                        "s" + l(
+                            # 0x07 ([)
+                            "s" + l(
+                                # 0x08 (])
+                                "s" + l(
+                                    # Unknown Op (Clear and exit)
+                                    clr()
+                                )
+                                # Action 0x08 (])
+                                + "m<[<]>[>]>m"
+                            )
+                            # Action 0x07 ([)
+                            + "m<[<]>+>[>]>m"
+                        )
+                        # Action 0x06 (,)
+                        + "m,m"
+                    )
+                    # Action 0x05 (.)
+                    + "m.m"
+                )
+                # Action 0x04 (-)
+                + "msm"
+            )
+            # Action 0x03 (+)
+            + "mam"
+        )
+        # Action 0x02 (<)
+        + "<"
+    )
+    # Action 0x01 (>)
+    + ">"
     
-    # Spaces Mapping
+    # Next Instruction
+    + ">>]"
+
+    # Replace macros to standard BF
+    # m: Move to Data (from Code)
+    # logic: [<] moves to start of code (0), > moves to Data separator (0), [>] moves to end of Data, > moves to new Data cell? 
+    # Actually the macro 'm' used in DBFI is specific: "[<]>[>]>"
+    # It assumes layout: 0 [Code] 0 [Data] 0
+    # From Code cell: [<] goes to left 0. > goes to Code start. [>] goes to right 0. > goes to Data start.
+    final_bf = bf.replace("m", "[<]>[>]>").replace("a","+").replace("s","-").replace("l","[")
+    
+    # Convert to Spaces
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     res = "".join([mapping[c] for c in final_bf if c in mapping])
