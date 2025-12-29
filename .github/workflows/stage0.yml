@@ -125,23 +125,27 @@ jobs:
           python3 tools/gen_compiler.py > spaces/self/compiler.spaces
           echo "Compiler Size: $(stat -c%s spaces/self/compiler.spaces)"
 
-      - name: Compile 'Hello World' using Self-Hosted Compiler
+            - name: Compile 'Hello World' using Self-Hosted Compiler
         run: |
-          # テスト用ソースコード (Hello World)
+          # テスト用ソースコード (Hello World in BF)
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          python3 tools/generator.py hello.bf > hello.spaces
 
-          # VM 上で コンパイラ を実行。入力: hello.spaces -> 出力: hello.bin
-          # 以前は ./bin/encoder (C製) を使っていた場所を置換！
-          ./bin/ref_vm spaces/self/compiler.spaces < hello.spaces > hello_self_hosted.bin
+          # VM 上で コンパイラ を実行。
+          # 入力: hello.bf (ASCII) -> 出力: hello_self_hosted.bin
+          # これにより、Spaces製ツールが「ソースコード」を読んで「バイナリ」を吐く動作を確認する。
+          ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello_self_hosted.bin
           
           echo "Generated Binary Size: $(stat -c%s hello_self_hosted.bin)"
-          # ヘッダ確認 (53 50 41 03)
+          # ヘッダ確認
           head -c 4 hello_self_hosted.bin | hexdump -C
+          # Opcodeが含まれているか確認 (サイズ > 4)
+          if [ $(stat -c%s hello_self_hosted.bin) -le 4 ]; then
+            echo "❌ Error: Binary contains only header!"
+            exit 1
+          fi
 
       - name: Run the Compiled Binary
         run: |
-          # 生成されたバイナリが正しく動くか (VMで実行)
           ./bin/ref_vm hello_self_hosted.bin > output.txt
           
           cat output.txt
@@ -151,6 +155,7 @@ jobs:
             echo "❌ Failed: Binary did not produce expected output."
             exit 1
           fi
+
 
       - name: Upload Artifacts
         if: always()
