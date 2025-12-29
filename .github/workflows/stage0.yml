@@ -48,8 +48,6 @@ jobs:
           if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
 
   # === Stage 3: Self-Hosted Identity Translator (Source-to-Source) ===
-  # "Spaces で Spaces (ソースコード) を読み込み、展開・出力する"
-  # これにより、言語処理系の自己記述性を証明する。
   verify-full-interp:
     runs-on: ubuntu-latest
     needs: verify-linear-interp
@@ -64,19 +62,15 @@ jobs:
 
       - name: Generate Self-Hosted Translator (Echo)
         run: |
-          # gen_full_interp.py は Spaces 言語で書かれた「恒等変換ツール」を生成する
           python3 tools/gen_full_interp.py > spaces/self/translator.spaces
           echo "Translator Size: $(stat -c%s spaces/self/translator.spaces)"
 
       - name: Create Test Input (Identity Verification)
         run: |
-          # テストデータを作成
           echo "Hello Spaces Self-Hosting!" > source.txt
 
       - name: Run Self-Hosted Translator
         run: |
-          # ref_vm (VM) が translator.spaces (Spaces製ツール) を実行。
-          # そのツールが source.txt を読み込み、標準出力に吐き出す。
           ./bin/ref_vm spaces/self/translator.spaces < source.txt > output.txt
 
       - name: Verify Output
@@ -86,7 +80,6 @@ jobs:
           echo "=== Output ==="
           cat output.txt
           
-          # diff で完全一致を確認
           if diff -q source.txt output.txt; then
             echo "🎉 STAGE 3 COMPLETE: Self-Hosted Translator is working!"
           else
@@ -103,11 +96,11 @@ jobs:
             spaces/self/translator.spaces
             source.txt
             output.txt
+
   # === Stage 4: Self-Hosted Compiler (Encoder) ===
-  # Spaces自身で「Spacesソース -> Spacesバイナリ」の変換を行う
   verify-self-hosted-compiler:
     runs-on: ubuntu-latest
-    needs: verify-linear-interp # Stage 3はスキップしてもOKだが、linearは必要
+    needs: verify-linear-interp
     steps:
       - uses: actions/checkout@v4
 
@@ -115,30 +108,25 @@ jobs:
         run: |
           mkdir -p bin spaces/self
           gcc src/ref/vm.c -o bin/ref_vm
-          # We still need the C encoder to bootstrap the compiler generator?
-          # Actually, gen_compiler.py produces Spaces code directly from Python logic.
-          # So we just need the VM.
 
       - name: Generate Self-Hosted Compiler
         run: |
-          # Pythonツールが「コンパイラ(Spaces版)」を生成する
           python3 tools/gen_compiler.py > spaces/self/compiler.spaces
           echo "Compiler Size: $(stat -c%s spaces/self/compiler.spaces)"
 
-            - name: Compile 'Hello World' using Self-Hosted Compiler
+      - name: Compile 'Hello World' using Self-Hosted Compiler
         run: |
           # テスト用ソースコード (Hello World in BF)
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
 
           # VM 上で コンパイラ を実行。
           # 入力: hello.bf (ASCII) -> 出力: hello_self_hosted.bin
-          # これにより、Spaces製ツールが「ソースコード」を読んで「バイナリ」を吐く動作を確認する。
           ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello_self_hosted.bin
           
           echo "Generated Binary Size: $(stat -c%s hello_self_hosted.bin)"
           # ヘッダ確認
           head -c 4 hello_self_hosted.bin | hexdump -C
-          # Opcodeが含まれているか確認 (サイズ > 4)
+          # Opcodeが含まれているか確認
           if [ $(stat -c%s hello_self_hosted.bin) -le 4 ]; then
             echo "❌ Error: Binary contains only header!"
             exit 1
@@ -156,7 +144,6 @@ jobs:
             exit 1
           fi
 
-
       - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -164,7 +151,6 @@ jobs:
           name: stage4-artifacts
           path: |
             spaces/self/compiler.spaces
-            hello.spaces
+            hello.bf
             hello_self_hosted.bin
             output.txt
-
