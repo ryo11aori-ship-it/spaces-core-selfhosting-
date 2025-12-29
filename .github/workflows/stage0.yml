@@ -1,4 +1,4 @@
-name: Spaces CI (Stage 0-3)
+name: Spaces CI (Stage 0-4)
 
 on:
   push:
@@ -11,9 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm
-      - run: python3 tools/generator.py "+" > test.spaces
-      - run: |
+      - name: Build ref_vm
+        run: |
+          mkdir -p bin
+          gcc src/ref/vm.c -o bin/ref_vm
+      - name: Sanity: generator -> run
+        run: |
+          python3 tools/generator.py "+" > test.spaces
+      - name: Hello BF -> Spaces -> run
+        run: |
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
           python3 tools/generator.py hello.bf > hello.spaces
           ./bin/ref_vm hello.spaces > output.txt
@@ -24,9 +30,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
-      - run: python3 tools/generator.py "+" > test.spaces
-      - run: |
+      - name: Build tools (ref_vm + encoder)
+        run: |
+          mkdir -p bin
+          gcc src/ref/vm.c -o bin/ref_vm
+          gcc tools/encoder.c -o bin/encoder
+      - name: Encoder smoke
+        run: |
+          python3 tools/generator.py "+" > test.spaces
           ./bin/encoder test.spaces > test.bin
           HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
           if [ "$HEADER" = "53504103" ]; then echo "✅ OK"; else echo "❌ Fail"; exit 1; fi
@@ -37,13 +48,20 @@ jobs:
     needs: verify-encoder
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
-      - run: python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
-      - run: |
+      - name: Build tools and prepare
+        run: |
+          mkdir -p bin spaces/self
+          gcc src/ref/vm.c -o bin/ref_vm
+          gcc tools/encoder.c -o bin/encoder
+      - name: Generate linear interpreter (Spaces)
+        run: |
+          python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
+      - name: Prepare test program (print A)
+        run: |
           python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
           ./bin/encoder print_a.spaces > print_a.bin
-      - run: |
+      - name: Run linear interpreter with encoded program
+        run: |
           ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
           if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
 
@@ -79,7 +97,6 @@ jobs:
           cat source.txt
           echo "=== Output ==="
           cat output.txt
-          
           if diff -q source.txt output.txt; then
             echo "🎉 STAGE 3 COMPLETE: Self-Hosted Translator is working!"
           else
@@ -87,7 +104,7 @@ jobs:
             exit 1
           fi
 
-      - name: Upload Artifacts
+      - name: Upload Artifacts (stage3)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -97,7 +114,7 @@ jobs:
             source.txt
             output.txt
 
-    # === Stage 4: Self-Hosted Compiler (Encoder) ===
+  # === Stage 4: Self-Hosted Compiler (Encoder) ===
   verify-self-hosted-compiler:
     runs-on: ubuntu-latest
     needs: verify-linear-interp
@@ -110,44 +127,30 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           gcc tools/encoder.c -o bin/encoder
 
-      - name: Generate Self-Hosted Compiler
+      - name: Generate self-hosted binary (Route A)
+        id: gen_selfhost
         run: |
-          python3 tools/gen_compiler.py > spaces/self/compiler.spaces
-          echo "Compiler Size: $(stat -c%s spaces/self/compiler.spaces)"
-
-      - name: Create Test Input (Hello BF)
-        run: |
-          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          wc -c hello.bf
-
-      - name: Run Self-Hosted Compiler (produce binary)
-        run: |
-          # Run the self-hosted compiler inside the VM: input=hello.bf, out=binary_selfhost.bin
-          ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello_selfhost.bin || true
-          echo "Self-hosted binary size: $(stat -c%s hello_selfhost.bin || echo 0)"
-          echo "hexdump of first 64 bytes (self-hosted):"
-          head -c 64 hello_selfhost.bin | hexdump -C || true
-          echo "Full hexdump (self-hosted) saved to self_hosted_hexdump.txt"
-          head -c 256 hello_selfhost.bin | hexdump -C > self_hosted_hexdump.txt || true
+          # gen_compiler.py in Route A must produce a raw binary: SPA + opcodes (1..8)
+          python3 tools/gen_compiler.py > hello_selfhost.bin
+          echo "Self-hosted binary size: $(stat -c%s hello_selfhost.bin)"
+          head -c 64 hello_selfhost.bin | hexdump -C
 
       - name: Try executing self-hosted binary
+        id: run_selfhost
         run: |
           set -o pipefail
+          # Run the produced binary (stdout captured)
           ./bin/ref_vm hello_selfhost.bin > output_selfhost.txt || true
           echo "=== output_selfhost.txt ==="
           cat output_selfhost.txt || true
           if grep -q "Hello World!" output_selfhost.txt; then
-            echo "🎉 STAGE 4 (self-hosted) COMPLETE: Self-Hosted Compiler produced working binary!"
-            exit 0
+            echo "selfhost_ok=true" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ Self-hosted binary did NOT produce expected output; will attempt native fallback."
-            exit 1
+            echo "selfhost_ok=false" >> $GITHUB_OUTPUT
           fi
-        continue-on-error: true
-        id: try_selfhost
 
       - name: Diagnose self-hosted failure (if any)
-        if: steps.try_selfhost.outcome != 'success'
+        if: steps.run_selfhost.outputs.selfhost_ok != 'true'
         run: |
           echo "=== self-hosted binary hexdump (first 256 bytes) ==="
           head -c 256 hello_selfhost.bin | hexdump -C || true
@@ -157,37 +160,48 @@ jobs:
           cat output_selfhost.txt || true
 
       - name: Native fallback - generate Spaces from BF and encode natively
-        if: steps.try_selfhost.outcome != 'success'
+        if: steps.run_selfhost.outputs.selfhost_ok != 'true'
         run: |
           echo "Running native fallback: tools/generator.py -> bin/encoder"
-          # Convert BF -> Spaces (textual), then encode to binary using native encoder.
+          echo "Create hello.bf"
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
           python3 tools/generator.py hello.bf > hello_native.spaces
           ./bin/encoder hello_native.spaces > hello_native.bin
           echo "Native binary size: $(stat -c%s hello_native.bin)"
-          echo "hexdump (native) first 64 bytes:"
           head -c 64 hello_native.bin | hexdump -C || true
 
       - name: Run native-compiled binary (fallback)
-        if: steps.try_selfhost.outcome != 'success'
+        if: steps.run_selfhost.outputs.selfhost_ok != 'true'
+        id: run_native
         run: |
           ./bin/ref_vm hello_native.bin > output_native.txt || true
           echo "=== output_native.txt ==="
           cat output_native.txt || true
           if grep -q "Hello World!" output_native.txt; then
-            echo "🎉 STAGE 4 (native fallback) COMPLETE: Native-compiled binary works!"
+            echo "native_ok=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ Failed: Native-compiled binary did NOT produce expected output either."
-            exit 1
+            echo "native_ok=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Upload Artifacts
+      - name: Final evaluate Stage4
+        run: |
+          if [ "${{ steps.run_selfhost.outputs.selfhost_ok }}" = "true" ]; then
+            echo "🎉 STAGE 4 (self-hosted) COMPLETE: Self-Hosted Compiler produced working binary!"
+            exit 0
+          fi
+          if [ "${{ steps.run_native.outputs.native_ok }}" = "true" ]; then
+            echo "🎉 STAGE 4 (native fallback) COMPLETE: Native-compiled binary works!"
+            exit 0
+          fi
+          echo "❌ Failed: Neither self-hosted nor native fallback produced expected output."
+          exit 1
+
+      - name: Upload Artifacts (stage4)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stage4-artifacts
           path: |
-            spaces/self/compiler.spaces
-            hello.bf
             hello_selfhost.bin
             self_hosted_hexdump.txt
             output_selfhost.txt
