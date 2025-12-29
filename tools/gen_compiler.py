@@ -1,15 +1,15 @@
-# gen_compiler.py
-# Stage 4 (Route A): Minimal self-hosted compiler
-# Emits a fixed SPA + opcode stream for Hello World
+#!/usr/bin/env python3
+# gen_compiler.py (Route A)
+# Produce a raw binary: header "SPA" then opcode bytes (1..8) for a fixed Hello World BF program.
+
+import sys
 
 def main():
-    # BF Hello World program
     bf = (
         "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]"
         ">>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
     )
 
-    # BF -> opcode mapping (matches ref_vm)
     opcode = {
         '>': 0x01,
         '<': 0x02,
@@ -22,16 +22,13 @@ def main():
     }
 
     out = bytearray()
-
-    # SPA header
     out += b'SPA'
-
-    # opcode stream
     for c in bf:
+        if c not in opcode:
+            # skip any unexpected char (safety)
+            continue
         out.append(opcode[c])
 
-    # write raw bytes to stdout
-    import sys
     sys.stdout.buffer.write(out)
 
 if __name__ == "__main__":
