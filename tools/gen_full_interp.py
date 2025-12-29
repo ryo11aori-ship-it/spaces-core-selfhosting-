@@ -1,16 +1,13 @@
 import sys
 
 # Stage 3: Deterministic "Skip-Logic" Interpreter generator
-# Based on the user's robust pointer movement logic.
-#
-# Memory Layout:
-# [0: Opcode] [1: Temp] [2: SkipFlag] [3: Data]
+# Fixed: Added guards to actions so they only run on match.
 
 def main():
     bf = []
     cur = 0
 
-    # --- Helper Functions (Deterministic Navigation) ---
+    # --- Helper Functions ---
     def emit(s):
         nonlocal cur
         bf.append(s)
@@ -31,7 +28,6 @@ def main():
         emit('[-]')
 
     def move_val(src, dst):
-        # Move value form src to dst (destructively)
         clear(dst)
         goto(src)
         emit('[')
@@ -49,169 +45,113 @@ def main():
 
     # --- 1. Header Consumption ---
     goto(IDX_OP)
-    emit(',,,') # Skip SPA
+    emit(',,,')
 
     # --- 2. Main Loop Setup ---
-    # Read first opcode
     goto(IDX_OP)
     emit(',') 
-    
-    # Loop while Opcode != 0
     emit('[')
 
-    # Move Opcode -> Temp (to process it without losing track)
     move_val(IDX_OP, IDX_TMP)
 
     # --- 3. Check SkipFlag ---
-    # Determine if we are Skipping or Executing based on IDX_SKIP.
-    # Move SkipFlag -> IDX_OP to use as "Is_Skipping" flag
     move_val(IDX_SKIP, IDX_OP)
     
-    # Now IDX_OP is 1 if skipping, 0 if executing.
     goto(IDX_OP)
     emit('[') 
-    # === SKIPPING MODE (Inside Loop: Op=1) ===
-    # Check if IDX_TMP == 8 (])
-    goto(IDX_TMP)
-    emit('-'*8)
+    # === SKIPPING MODE ===
+    goto(IDX_TMP); emit('-'*8)
     
-    # Check if Temp is 0 (Match found)
-    # Use IDX_SKIP as "Found" flag (currently 0)
-    goto(IDX_SKIP)
-    emit('+') # Found=1
+    goto(IDX_SKIP); emit('+') # Found=1
+    goto(IDX_TMP); emit('['); goto(IDX_SKIP); emit('-'); goto(IDX_TMP); emit('[-]'); emit(']')
     
-    goto(IDX_TMP)
-    emit('[') # If Temp!=0 (Not ']')
-    goto(IDX_SKIP)
-    emit('-') # Found=0
-    goto(IDX_TMP)
-    emit('[-]')
-    emit(']')
+    goto(IDX_SKIP); emit('['); goto(IDX_OP); emit('[-]'); goto(IDX_SKIP); emit('-'); emit(']')
     
-    # Check Found (IDX_SKIP)
-    goto(IDX_SKIP)
-    emit('[') # If Found=1 (Found ']')
-    goto(IDX_OP)
-    emit('[-]') # Set Is_Skipping = 0 (Clear Loop Flag)
-    goto(IDX_SKIP)
-    emit('-') # Clear Found
-    emit(']')
-    
-    # If Is_Skipping (Op) is still 1, we preserve it.
-    # Move Op -> IDX_SKIP (Restore State)
     move_val(IDX_OP, IDX_SKIP) 
-    
-    goto(IDX_OP) # Should be 0
-    emit(']') # End Skip Logic
-    
+    goto(IDX_OP); emit(']') 
     
     # --- 4. Execute Logic ---
-    # We execute ONLY if IDX_SKIP == 0.
-    # And if IDX_TMP != 0 (instruction exists and wasn't consumed by skip logic).
-    
     goto(IDX_TMP)
     emit('[') 
-    # === EXECUTE MODE (Temp has Opcode) ===
+    # === EXECUTE MODE ===
     
-    # DECODE (Subtract approach)
     # Check 7 ([)
     emit('-'*7)
     
-    # Try `[` (7)
-    # We use IDX_OP as "Is_Match" flag.
-    goto(IDX_OP); emit('+')
-    goto(IDX_TMP); emit('[') # If not 0 (Not 7)
-    goto(IDX_OP); emit('-')
+    goto(IDX_OP); emit('+') # Match=1
+    goto(IDX_TMP); emit('[') # If Not 7
+    goto(IDX_OP); emit('-') # Match=0
     goto(IDX_TMP); emit('-') # Check 8 (])
     
-    # Try `]` (8)
-    emit('['); 
-    goto(IDX_OP); emit('-'); 
-    goto(IDX_TMP); emit('-') # If not 0 (Not 8)
-    
-    # Restore for checks 3,4,5,6
-    # Original - 8. Add 2 -> Original - 6
-    emit('+'*2)
-    
-    # Check 6 (,)
-    emit('['); 
-    goto(IDX_OP); emit('-'); 
-    goto(IDX_TMP); emit('-')
-    
-    # Check 5 (.)
-    emit('['); 
-    goto(IDX_OP); emit('-'); 
-    goto(IDX_TMP); emit('-')
-    
-    # Check 4 (-)
-    emit('['); 
-    goto(IDX_OP); emit('-'); 
-    goto(IDX_TMP); emit('-')
-    
-    # Check 3 (+)
-    emit('['); 
-    goto(IDX_OP); emit('-'); 
-    goto(IDX_TMP); emit('[-]') # Consume rest
-    emit(']')
-    
-    # === ACTIONS ===
-    # Here we are deep in nested brackets. 
-    # But since we use IDX_OP as "Match Flag", we can just close all brackets
-    # and check logic linearly below? No, we lost the state.
-    
-    # Correct linear approach:
-    # Just close the nesting carefully.
-    emit(']') # End Check 3
-    
-    # If Match (Op=1): Action 3 (+)
-    goto(IDX_DATA); emit('+'); goto(IDX_OP)
-    
-    emit(']') # End Check 4
-    # Action 4 (-)
-    goto(IDX_DATA); emit('-'); goto(IDX_OP)
-    
-    emit(']') # End Check 5
-    # Action 5 (.)
-    goto(IDX_DATA); emit('.'); goto(IDX_OP)
-    
-    emit(']') # End Check 6
-    # Action 6 (,) - Ignore
-    
-    emit(']') # End Check 8
-    # Action 8 (]) - Ignore (End of loop iteration)
-    
+      # Check 8 (])
+      emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+      emit('+'*2) # Restore for 6
+      
+        # Check 6 (,)
+        emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+        
+          # Check 5 (.)
+          emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+          
+            # Check 4 (-)
+            emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+            
+              # Check 3 (+)
+              emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('[-]'); emit(']')
+              
+              # Action 3 (+)
+              goto(IDX_OP); emit('[') # IF MATCH
+              goto(IDX_DATA); emit('+')
+              goto(IDX_OP); emit('-') # Clear Match
+              emit(']')
+
+            emit(']') # End Check 4
+            # Action 4 (-)
+            goto(IDX_OP); emit('[')
+            goto(IDX_DATA); emit('-')
+            goto(IDX_OP); emit('-')
+            emit(']')
+            
+          emit(']') # End Check 5
+          # Action 5 (.)
+          goto(IDX_OP); emit('[')
+          goto(IDX_DATA); emit('.')
+          goto(IDX_OP); emit('-')
+          emit(']')
+
+        emit(']') # End Check 6
+        
+      emit(']') # End Check 8
+      # Action 8 (]) - Ignore
+      goto(IDX_OP); emit('[')
+      emit('-')
+      emit(']')
+      
     emit(']') # End Check 7
     
-    # Action 7 ([) logic
-    # If Match (Op=1): Check Data. If 0, Set SkipFlag=1.
-    # We are at IDX_TMP (0). IDX_OP is 1.
+    # Action 7 ([)
+    goto(IDX_OP); emit('[')
     
-    # To run this only if Match=1:
-    goto(IDX_OP)
-    emit('[')
-    # Action 7 Logic:
-    goto(IDX_SKIP); emit('+') # Flag/Skip = 1
+    goto(IDX_SKIP); emit('+') # Assume Skip
     goto(IDX_DATA); emit('[') # If Data!=0
-    goto(IDX_SKIP); emit('-') # Skip = 0
-    goto(IDX_DATA); emit('[') # Clear Data temporarily to exit check? No, restore.
+    goto(IDX_SKIP); emit('-') # No Skip
+    goto(IDX_DATA); emit('[')
     emit('-')
-    goto(IDX_TMP); emit('+') # Backup
+    goto(IDX_TMP); emit('+') 
     goto(IDX_DATA); emit(']')
-    # Restore Data
     goto(IDX_TMP); emit('['); emit('-'); goto(IDX_DATA); emit('+'); goto(IDX_TMP); emit(']')
     goto(IDX_DATA); emit(']')
     
-    goto(IDX_OP); emit('-') # Clear Match Flag
+    goto(IDX_OP); emit('-')
     emit(']')
     
-    # End of Decode Tree
-    goto(IDX_TMP); emit('[-]') # Ensure Temp is clear
-    emit(']') # End Execute Logic (If Temp!=0)
+    goto(IDX_TMP); emit('[-]') 
+    emit(']') # End Execute
     
     # --- 5. Next Loop ---
     goto(IDX_OP)
-    emit(',') # Read next opcode
-    emit(']') # End Main Loop
+    emit(',') 
+    emit(']') 
 
     # --- Output ---
     S, F = " ", "\u3000"
