@@ -1,9 +1,9 @@
 import sys
 
-# Stage 3: Robust Linear-Check Interpreter with Safe Scan
+# Stage 3: Robust Interpreter with "Linear Consumption" Scan
 # Features:
-# - Python indentation is strictly flattened to prevent Syntax Errors.
-# - Safe scan for '[' (Data=0) until ']' (8) or EOF (0).
+# - Strictly flat indentation.
+# - Scan Logic consumes input explicitly inside Action 7.
 
 def main():
     bf = []
@@ -67,7 +67,7 @@ def main():
     goto(IDX_OP); emit(',')
     emit('[')
 
-    # Copy Op to Temp for decoding
+    # Copy Op to Temp
     copy_val(IDX_OP, IDX_TMP, IDX_FLAG)
     
     # Initialize Done_Flag = 0
@@ -116,36 +116,60 @@ def main():
         goto(IDX_DATA); emit('.')
         
     def act_scan():
-        # Scan until ] (8) or 0 (EOF)
+        # Physical Scan Logic:
+        # Loop while ScanFlag is 1.
+        # Inside loop: Read char. If ']' or 0, Set ScanFlag=0.
+        
         clear(IDX_SCAN_FLAG); emit('+')
+        
         goto(IDX_SCAN_FLAG)
         emit('[')
+        
+        # Read next char into IDX_CHAR
         goto(IDX_CHAR); emit(',')
         
         # Check if 0 (EOF)
+        # If 0, Stop (Clear ScanFlag)
         copy_val(IDX_CHAR, IDX_EXTRA, IDX_EXTRA_2)
         clear(IDX_IS_MATCH); emit('+')
         goto(IDX_EXTRA); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA); emit('[-]'); emit(']')
         
         goto(IDX_IS_MATCH); emit('[')
-        clear(IDX_SCAN_FLAG) # EOF found, Stop
+        clear(IDX_SCAN_FLAG) # EOF -> Stop
         clear(IDX_IS_MATCH)
         emit(']')
         
         # Check if 8 (])
+        # Only if ScanFlag is still 1
         copy_val(IDX_SCAN_FLAG, IDX_EXTRA, IDX_EXTRA_2)
         goto(IDX_EXTRA); emit('[')
+        
         copy_val(IDX_CHAR, IDX_EXTRA_2, IDX_EXTRA)
         goto(IDX_EXTRA_2); emit('-'*8)
+        
         clear(IDX_IS_MATCH); emit('+')
         goto(IDX_EXTRA_2); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA_2); emit('[-]'); emit(']')
+        
         goto(IDX_IS_MATCH); emit('[')
-        clear(IDX_SCAN_FLAG) # ] found, Stop
+        clear(IDX_SCAN_FLAG) # ] -> Stop
         clear(IDX_IS_MATCH)
         emit(']')
+        
         clear(IDX_EXTRA)
         emit(']')
-        goto(IDX_SCAN_FLAG); emit(']')
+        
+        goto(IDX_SCAN_FLAG); emit(']') # Loop
+        
+        # Done Scanning.
+        # The main loop expects us to read the *next* opcode.
+        # But we just read ']' (or 0) into IDX_CHAR.
+        # We need to *consume* it so the main loop reads the one *after*.
+        # Wait, if we read ']', the main loop will execute ']' next?
+        # No, ']' is a no-op in our linear interpreter.
+        # But if we don't consume it, the main loop reads it again?
+        # NO. We read into IDX_CHAR. The main loop reads into IDX_OP.
+        # They are different cells. The file pointer has moved.
+        # So we are good. The next main loop iteration will read the char *after* ']'.
 
     # --- Generate Checks 1..8 ---
     check_opcode_and_act(lambda: None) # 1
