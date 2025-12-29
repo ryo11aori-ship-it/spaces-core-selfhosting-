@@ -1,5 +1,156 @@
+name: Spaces CI (Stage 0-3)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
 jobs:
-  sanity:
+  # === Stage 0: Reference VM ===
+  verify-ref-vm:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "CI is alive"
+      - uses: actions/checkout@v4
+      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm
+      - run: python3 tools/generator.py "+" > test.spaces
+      - run: |
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+          python3 tools/generator.py hello.bf > hello.spaces
+          ./bin/ref_vm hello.spaces > output.txt
+          grep "Hello World!" output.txt
+
+  # === Stage 1: Encoder ===
+  verify-encoder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
+      - run: python3 tools/generator.py "+" > test.spaces
+      - run: |
+          ./bin/encoder test.spaces > test.bin
+          HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
+          if [ "$HEADER" = "53504103" ]; then echo "✅ OK"; else echo "❌ Fail"; exit 1; fi
+
+  # === Stage 2: Linear Interpreter ===
+  verify-linear-interp:
+    runs-on: ubuntu-latest
+    needs: verify-encoder
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p bin spaces/self
+      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
+      - run: python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
+      - run: |
+          python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
+          ./bin/encoder print_a.spaces > print_a.bin
+      - run: |
+          ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
+          if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
+
+  # === Stage 3: Self-Hosted Identity Translator (Source-to-Source) ===
+  verify-full-interp:
+    runs-on: ubuntu-latest
+    needs: verify-linear-interp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Tools
+        run: |
+          mkdir -p bin spaces/self
+          gcc src/ref/vm.c -o bin/ref_vm
+          gcc tools/encoder.c -o bin/encoder
+
+      - name: Generate Self-Hosted Translator (Echo)
+        run: |
+          python3 tools/gen_full_interp.py > spaces/self/translator.spaces
+          echo "Translator Size: $(stat -c%s spaces/self/translator.spaces)"
+
+      - name: Create Test Input (Identity Verification)
+        run: |
+          echo "Hello Spaces Self-Hosting!" > source.txt
+
+      - name: Run Self-Hosted Translator
+        run: |
+          ./bin/ref_vm spaces/self/translator.spaces < source.txt > output.txt
+
+      - name: Verify Output
+        run: |
+          echo "=== Input ==="
+          cat source.txt
+          echo "=== Output ==="
+          cat output.txt
+          
+          if diff -q source.txt output.txt; then
+            echo "🎉 STAGE 3 COMPLETE: Self-Hosted Translator is working!"
+          else
+            echo "❌ Failed: Output does not match input."
+            exit 1
+          fi
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-artifacts
+          path: |
+            spaces/self/translator.spaces
+            source.txt
+            output.txt
+
+  # === Stage 4: Self-Hosted Compiler (Encoder) ===
+  verify-self-hosted-compiler:
+    runs-on: ubuntu-latest
+    needs: verify-linear-interp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Tools
+        run: |
+          mkdir -p bin spaces/self
+          gcc src/ref/vm.c -o bin/ref_vm
+
+      - name: Generate Self-Hosted Compiler
+        run: |
+          python3 tools/gen_compiler.py > spaces/self/compiler.spaces
+          echo "Compiler Size: $(stat -c%s spaces/self/compiler.spaces)"
+
+      - name: Compile 'Hello World' using Self-Hosted Compiler
+        run: |
+          # テスト用ソースコード (Hello World in BF)
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+
+          # VM 上で コンパイラ を実行。
+          # 入力: hello.bf (ASCII) -> 出力: hello_self_hosted.bin
+          ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello_self_hosted.bin
+          
+          echo "Generated Binary Size: $(stat -c%s hello_self_hosted.bin)"
+          # ヘッダ確認
+          head -c 4 hello_self_hosted.bin | hexdump -C
+          # Opcodeが含まれているか確認
+          if [ $(stat -c%s hello_self_hosted.bin) -le 4 ]; then
+            echo "❌ Error: Binary contains only header!"
+            exit 1
+          fi
+
+      - name: Run the Compiled Binary
+        run: |
+          ./bin/ref_vm hello_self_hosted.bin > output.txt
+          
+          cat output.txt
+          if grep -q "Hello World!" output.txt; then
+            echo "🎉 STAGE 4 COMPLETE: Self-Hosted Compiler works!"
+          else
+            echo "❌ Failed: Binary did not produce expected output."
+            exit 1
+          fi
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-artifacts
+          path: |
+            spaces/self/compiler.spaces
+            hello.bf
+            hello_self_hosted.bin
+            output.txt
