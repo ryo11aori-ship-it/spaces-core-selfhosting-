@@ -1,7 +1,7 @@
 import sys
 
 # Stage 3: Deterministic "Skip-Logic" Interpreter generator
-# Fixed: Added guards to actions so they only run on match.
+# Fixed: Removed visual indentation that caused Python Syntax Errors.
 
 def main():
     bf = []
@@ -83,49 +83,50 @@ def main():
     goto(IDX_OP); emit('-') # Match=0
     goto(IDX_TMP); emit('-') # Check 8 (])
     
-      # Check 8 (])
-      emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
-      emit('+'*2) # Restore for 6
-      
-        # Check 6 (,)
-        emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
-        
-          # Check 5 (.)
-          emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
-          
-            # Check 4 (-)
-            emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
-            
-              # Check 3 (+)
-              emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('[-]'); emit(']')
-              
-              # Action 3 (+)
-              goto(IDX_OP); emit('[') # IF MATCH
-              goto(IDX_DATA); emit('+')
-              goto(IDX_OP); emit('-') # Clear Match
-              emit(']')
+    # Check 8 (])
+    emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+    emit('+'*2) # Restore for 6
+    
+    # Check 6 (,)
+    emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+    
+    # Check 5 (.)
+    emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+    
+    # Check 4 (-)
+    emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('-')
+    
+    # Check 3 (+)
+    emit('['); goto(IDX_OP); emit('-'); goto(IDX_TMP); emit('[-]'); emit(']')
+    
+    # Action 3 (+)
+    goto(IDX_OP); emit('[') # IF MATCH
+    goto(IDX_DATA); emit('+')
+    goto(IDX_OP); emit('-') # Clear Match
+    emit(']')
 
-            emit(']') # End Check 4
-            # Action 4 (-)
-            goto(IDX_OP); emit('[')
-            goto(IDX_DATA); emit('-')
-            goto(IDX_OP); emit('-')
-            emit(']')
-            
-          emit(']') # End Check 5
-          # Action 5 (.)
-          goto(IDX_OP); emit('[')
-          goto(IDX_DATA); emit('.')
-          goto(IDX_OP); emit('-')
-          emit(']')
+    emit(']') # End Check 4
+    # Action 4 (-)
+    goto(IDX_OP); emit('[')
+    goto(IDX_DATA); emit('-')
+    goto(IDX_OP); emit('-')
+    emit(']')
+    
+    emit(']') # End Check 5
+    # Action 5 (.)
+    goto(IDX_OP); emit('[')
+    goto(IDX_DATA); emit('.')
+    goto(IDX_OP); emit('-')
+    emit(']')
 
-        emit(']') # End Check 6
-        
-      emit(']') # End Check 8
-      # Action 8 (]) - Ignore
-      goto(IDX_OP); emit('[')
-      emit('-')
-      emit(']')
+    emit(']') # End Check 6
+    # Action 6 (,) - Ignore
+    
+    emit(']') # End Check 8
+    # Action 8 (]) - Ignore
+    goto(IDX_OP); emit('[')
+    emit('-')
+    emit(']')
       
     emit(']') # End Check 7
     
@@ -139,6 +140,7 @@ def main():
     emit('-')
     goto(IDX_TMP); emit('+') 
     goto(IDX_DATA); emit(']')
+    # Restore Data
     goto(IDX_TMP); emit('['); emit('-'); goto(IDX_DATA); emit('+'); goto(IDX_TMP); emit(']')
     goto(IDX_DATA); emit(']')
     
