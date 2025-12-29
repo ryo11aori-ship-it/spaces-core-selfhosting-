@@ -1,129 +1,126 @@
 import sys
 
 # Stage 4: Self-Hosted Compiler (BF Source -> Spaces Binary)
-# Fixed: ensure output-temp cell is cleared and pointer movements are explicit,
-#        avoiding residual values that produced wrong opcode bytes.
+# Strategy:
+# - Emit SPA header as before.
+# - For each input byte (BF source char), explicitly test against each BF command
+#   by re-copying the original and subtracting the candidate ASCII value.
+# - If equal, write the corresponding opcode byte (1..8) via output cell.
+#
+# This is naive but reliable and self-contained as a BF program (encoded to Spaces).
 
 def main():
     bf = []
     def emit(s): bf.append(s)
 
-    # --- 1. Header (SPA\x03) ---
-    # We'll output 4 bytes: 'S'(0x53), 'P'(0x50), 'A'(0x41), '\x03'
-    # Use cell0 for temporary output for header and clear after each write.
+    # --- Header: 'S' 'P' 'A' 0x03 ---
     emit('+' * 0x53); emit('.'); emit('[-]')
     emit('+' * 0x50); emit('.'); emit('[-]')
     emit('+' * 0x41); emit('.'); emit('[-]')
     emit('+' * 0x03); emit('.'); emit('[-]')
 
-    # --- 2. Main Loop ---
-    # We'll read input chars and for each char output the opcode byte.
-    # Memory layout (per-record):
-    # cell 0: input char (original)
-    # cell 1: copy (working)
-    # cell 2: helper/flag
-    # cell 3: output byte (we MUST clear this before each use)
+    # --- Main loop: read input char-by-char and output opcode ---
+    # Memory layout per iteration:
+    # cell0: input char (original)
+    # cell1: working copy
+    # cell2: flag / helper
+    # cell3: output byte (cleared before use)
 
-    emit(',')     # Read first byte (into cell0)
-    emit('[')     # while not EOF
+    emit(',')   # read first char into cell0
+    emit('[')   # while cell0 != 0
 
-    # Clear cells 1..3 at start of each iteration (safety)
-    # move -> clear cell1, ->clear cell2, ->clear cell3, back to cell0
-    emit('>[-]>[-]>[-]<<<')
+    # We'll loop through each candidate and do:
+    #   - clear cells 1..3
+    #   - copy cell0 -> cell1 (preserve cell0)
+    #   - subtract candidate from cell1
+    #   - set flag and test; if zero -> output opcode in cell3
+    # After checking all candidates, read next char.
 
-    # Copy cell0 -> cell1 & cell2 (standard copy idiom); restores via cell2 later
-    emit('[>+>+<<-]')    # after this: cell1 & cell2 get copies; cell0 becomes 0
-    emit('>>[<<+>>-]')   # move cell2 -> cell0 (restore original). ptr at cell2
-    emit('<<')           # return to cell0
+    def candidate_block(ascii_val, out_opcode):
+        """
+        Emit BF snippet that:
+         - re-copies original from cell0 to cell1
+         - subtracts ascii_val from cell1
+         - if zero: set cell3 to out_opcode and output it
+         - always returns pointer to cell0
+        Assumes pointer at cell0 at entry.
+        """
+        s = []
+        # 1) Clear cells 1,2,3 defensively, then return to cell0
+        s.append('>[-]>[-]>[-]<<<')
 
-    # Now define a robust check-and-output which DOES NOT rely on a previously
-    # subtracted cumulative value but uses the two copies (cell1 used for test,
-    # cell2 is already zero after restore). We'll subtract on cell1 and use cell3
-    # for output; cell3 is guaranteed cleared above.
+        # 2) Copy cell0 -> cell1 & cell2, restore cell0 (common copy idiom)
+        s.append('[>+>+<<-]')    # cell0 -> cell1,cell2 ; cell0 = 0
+        s.append('>>[<<+>>-]')   # move cell2 -> cell0 ; cell2 = 0 ; ptr at cell2
+        s.append('<<')           # ptr -> cell0
 
-    def check_and_out(delta, out_opcode):
-        # subtract delta from the copy in cell1, using ptr starting at cell0
-        # go to cell1
-        emit('>')                  # ptr -> 1
-        emit('-' * delta)          # cell1 -= delta
+        # 3) Move to cell1 and subtract ascii_val
+        s.append('>')            # ptr -> cell1
+        if ascii_val > 0:
+            s.append('-' * ascii_val)  # destructive subtraction on cell1
 
-        # Set flag in cell2 = 1
-        emit('>[-]+')              # ptr -> 2 ; clear then set to 1
+        # 4) Set flag in cell2 = 1
+        s.append('>[-]+')        # ptr -> cell2 ; clear then set to 1
 
-        # Back to cell1 and if cell1 != 0 then clear flag and clear cell1
-        emit('<')                  # ptr -> 1
-        # If cell1 > 0: [>-<[-]] : decrement flag and clear cell1
-        emit('[>-<[-]]')           # after this: flag==1 iff (cell1 == 0 originally)
+        # 5) If cell1 != 0 then clear flag and clear cell1
+        s.append('<')            # ptr -> cell1
+        s.append('[>-<[-]]')     # if cell1>0 then flag-- and clear cell1
 
-        # Move to flag cell
-        emit('>')                  # ptr -> 2
+        # 6) If flag == 1 -> produce output in cell3
+        s.append('>')            # ptr -> cell2 (flag)
+        s.append('[')            # if flag
+        s.append('[-]')          # clear flag
+        s.append('>')            # ptr -> cell3 (output cell)
+        s.append('[-]')          # ensure clean
+        if out_opcode > 0:
+            s.append('+' * out_opcode)   # set output cell to opcode value
+        s.append('.')            # emit output byte
+        s.append('[-]')          # clear output cell
+        s.append('<')            # back to flag
+        s.append(']')            # end if
 
-        # If flag==1 then produce output in cell3
-        # ptr at 2
-        emit('[')                  # if flag
-        emit('[-]')                # clear flag
-        emit('>')                  # ptr -> 3 (output cell)
-        # ensure output cell is clean (we already cleared at loop start, but clear again defensively)
-        emit('[-]')
-        # set output cell to opcode value
-        emit('+' * out_opcode)
-        emit('.')                  # emit output byte
-        emit('[-]')                # clear output cell
-        emit('<')                  # back to flag cell (2)
-        emit(']')                  # end if
+        # 7) Return pointer to cell0
+        s.append('<<')           # ptr -> cell0
 
-        # return pointer to cell0 for next check
-        emit('<<')                 # ptr -> 0
+        return "".join(s)
 
-    # Opcode mapping order and deltas (using progressive differences is OK,
-    # but our implementation uses absolute subtract-on-copy so deltas are
-    # the absolute values of target ASCII).
-    # We'll implement checks using the original delta-difference scheme but our
-    # check_and_out now subtracts directly from the copy (so deltas must be absolute).
-    # However to keep minimal change vs original, use same delta chain but it's
-    # now interpreted as successive deltas (works as before). For clarity we use
-    # absolute values instead (explicit).
+    # Candidate list: (char, ascii, opcode)
+    candidates = [
+        ('+', 43, 3),
+        (',', 44, 6),
+        ('-', 45, 4),
+        ('.', 46, 5),
+        ('<', 60, 2),
+        ('>', 62, 1),
+        ('[', 91, 7),
+        (']', 93, 8),
+    ]
 
-    # Map target ASCII values to out_opcode:
-    # '+' 43 -> opcode 0x03
-    # ',' 44 -> 0x06
-    # '-' 45 -> 0x04
-    # '.' 46 -> 0x05
-    # '<' 60 -> 0x02
-    # '>' 62 -> 0x01
-    # '[' 91 -> 0x07
-    # ']' 93 -> 0x08
+    # Emit candidate checks in a stable order
+    for ch, ascii_val, opcode in candidates:
+        bf_block = candidate_block(ascii_val, opcode)
+        emit(bf_block)
 
-    # We'll perform checks by subtracting the absolute ASCII value from the copy.
-    # To do that we must first refill the copy for each check; since we've already
-    # left a pristine copy in cell1 at loop start, and we mutate cell1 in every
-    # check, we should instead re-copy before each check. Simpler: we'll re-generate
-    # the copy before the chain of checks so that checks operate on fresh copy.
-    # But to keep BF size small we do the chain once as original did (progressive diffs),
-    # that approach also works — keep the original progressive-delta order but ensure
-    # output cell cleared. So we keep original delta list.
+    # After checking all candidates, clear cell0 and read next char
+    # (We keep cell0 intact between checks; clearing ensures no stray values)
+    emit('[-]')
+    emit(',')      # read next char
+    emit(']')      # end main loop
 
-    # Use progressive deltas as in original:
-    check_and_out(43, 3) # + (43) -> Op 3
-    check_and_out(1, 6)  # , (44) -> Op 6  (delta 1 from previous)
-    check_and_out(1, 4)  # - (45) -> Op 4
-    check_and_out(1, 5)  # . (46) -> Op 5
-    check_and_out(14, 2) # < (60) -> Op 2
-    check_and_out(2, 1)  # > (62) -> Op 1
-    check_and_out(29, 7) # [ (91) -> Op 7
-    check_and_out(2, 8)  # ] (93) -> Op 8
-
-    # Clear residuals and read next input
-    emit('[-]')  # clear cell0 (safety)
-    emit(',')    # read next char
-    emit(']')    # end main while
-
-    # Convert BF to Spaces (source encoding)
+    # Convert BF program to Spaces encoding
     S, F = " ", "\u3000"
-    mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
+    mapping = {
+        '>': S*3, '<': S*2+F, '+': S+F+S, '-': S+F+F,
+        '.': F+S+S, ',': F+S+F, '[': F*2+S, ']': F*3
+    }
 
     full_bf = "".join(bf)
-    print("".join([mapping.get(c, '') for c in full_bf]), end='')
+    # Map any BF characters in full_bf; if other chars appear (none should), ignore.
+    out = []
+    for c in full_bf:
+        if c in mapping:
+            out.append(mapping[c])
+    sys.stdout.write("".join(out))
 
 if __name__ == "__main__":
     main()
