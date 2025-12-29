@@ -48,7 +48,7 @@ jobs:
           ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
           if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
 
-    # === Stage 3: Full Self-Interpreter (Turing Complete) ===
+  # === Stage 3: Full Self-Interpreter (Turing Complete) ===
   verify-full-interp:
     runs-on: ubuntu-latest
     needs: verify-linear-interp
@@ -65,16 +65,12 @@ jobs:
         run: |
           python3 tools/gen_full_interp.py > spaces/self/full_interp.spaces
 
-            - name: Create Test Input (Loop Skip Logic)
+      - name: Create Test Input (Loop Skip Logic)
         run: |
           # 証明用コード: (Pointer移動なし版)
           # 初期値 0。
           # [ +++++ ]  <-- 0なのでスキップされるべき。
           # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ . <-- 'A'(65)を出力
-          # もしスキップに失敗して中に入ると、+5 されて 'F'(70) になってしまう。
-          
-          # 注意: generator.py は引数を文字列として受け取れる
-          # コード: [+++++]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.
           
           python3 tools/generator.py "[+++++]+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > loop_test.spaces
           ./bin/encoder loop_test.spaces > loop_test.bin
