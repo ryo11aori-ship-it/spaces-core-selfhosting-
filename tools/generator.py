@@ -1,33 +1,34 @@
 import sys
+import os
 
-# 0 = 半角スペース(U+0020), 1 = 全角スペース(U+3000)
-MAPPING = {
-    '>': '\u0020\u0020\u0020', # 000
-    '<': '\u0020\u0020\u3000', # 001
-    '+': '\u0020\u3000\u0020', # 010
-    '-': '\u0020\u3000\u3000', # 011
-    '.': '\u3000\u0020\u0020', # 100
-    ',': '\u3000\u0020\u3000', # 101
-    '[': '\u3000\u3000\u0020', # 110
-    ']': '\u3000\u3000\u3000', # 111
-}
+def main():
+    if len(sys.argv) < 2: return
+    
+    arg = sys.argv[1]
+    code = ""
 
-def compile_to_spaces(bf_code):
-    # マッピングにない文字は無視して連結
-    return "".join(MAPPING[c] for c in bf_code if c in MAPPING)
+    # 引数がファイルとして存在すれば読み込む、なければそのままコードとして扱う
+    if os.path.isfile(arg):
+        with open(arg, 'r', encoding='utf-8') as f:
+            code = f.read()
+    else:
+        code = arg
+
+    S = " "
+    F = "\u3000"
+    mapping = {
+        '>': S+S+S, '<': S+S+F,
+        '+': S+F+S, '-': S+F+F,
+        '.': F+S+S, ',': F+S+F,
+        '[': F+F+S, ']': F+F+F
+    }
+    
+    res = ""
+    for c in code:
+        if c in mapping: res += mapping[c]
+    
+    # 最後に改行を入れない（バイナリ一致検証のため）
+    print(res, end='')
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        # パイプ入力対応
-        source = sys.stdin.read()
-    else:
-        # ファイル入力対応
-        with open(sys.argv[1], 'r', encoding='utf-8') as f:
-            source = f.read()
-            
-    result = compile_to_spaces(source)
-    
-    # 【重要修正】
-    # 環境のエンコーディング設定を無視して、強制的にUTF-8のバイト列として出力する
-    # これにより全角スペースが確実に書き込まれる
-    sys.stdout.buffer.write(result.encode('utf-8'))
+    main()
