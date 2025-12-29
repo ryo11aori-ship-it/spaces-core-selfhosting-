@@ -8,193 +8,104 @@ def main():
     def l(c): return "[" + c + "]"
     def clr(): return "[-]"
 
-    # --- Full Interpreter Logic (With Nesting Support) ---
-    # Memory Layout:
-    # [Code Area...] 0 [Flag/Counter] 0 [Data Area...]
-    # We maintain strict separation.
+    # --- Full Interpreter Logic ---
+    # Memory Layout: 0 0 [StartMarker=1] [Code...] 0 [Temp/Op] [Flag] 0 [Data...]
     
-    # Logic constants
-    to_data_start = "[>]>"   # From Code end to Data start
-    to_code_end   = "<[<]"   # From Data start to Code end
-    
+    # Macro: Move Focus
+    to_data = "[<]>[>]>"
+    to_code = "<[<]>[>]<" 
+
     bf = ""
-    # 1. Skip Header (S, P, A)
-    bf += ","*3 
+    # 1. Skip Header
+    bf += m(1) + ","*3 
     
     # 2. Read Code (until 0)
-    # Layout: 0 [Code...] 0
-    bf += ">>" + l("," + m(1)) + m(2) 
+    bf += m(3) + a(1) + l( "," + l( m(1) ) + a(1) + m(-1) + s(1) + m(-1) ) + m(2)
     
-    # 3. Execution Loop
-    # Pointer is at Data Start. 
-    # Structure: 0 [Code] 0 [Flag] 0 [Data]
+    # 3. Go to Code Start
+    bf += l( l( m(1) ) + a(1) + m(-1) + s(1) + m(-1) ) + m(1)
     
-    # Move to Code Start
-    bf += to_code_end + "<[<]>"
+    # 4. Main Loop
+    bf += "["
     
-    # Main Fetch-Decode Loop
-    bf += l(
-        # Check if we are at the end of code (0) happens implicitly by loop condition
-        
-        # Copy Opcode to Flag for checking
-        # Layout: [Op] 0 [Flag]
-        l( m(1)+a(1)+m(1)+a(1)+m(-2) ) + m(2) + l(m(-2)+a(1)+m(2)) + m(-2)
-        
-        # --- DECODE ---
-        # We are at [Op]. Flag has copy.
-        # Check 1..8. If match, exec and clear Flag.
-        
-        # 0x01 (>)
-        + s(1) + l(
-            m(2) + s(1) + l( # Check Flag
-                # Action: Move Data Ptr Right
-                m(1) + m(1) + m(-1) # Just shift logical view? 
-                # Implementing actual tape movement in BF-in-BF is hard. 
-                # We assume [Data] is just one cell for this bootstrap test 
-                # OR we implement a simple slide.
-                # For Stage 3 Proof, we just need to pass the test.
-                # We will use the simplest "Slide" logic: 
-                # We are at [Flag]. Data is at [Data]. 
-                # > : Move 'Data Start' definition right? No.
-                # Standard BF interpreter shifts the whole tape? No.
-                # Standard approach: The "Robot" moves.
-                
-                # Let's use a simpler Fixed-Size Data approach for bootstrap.
-                # [Op] [Flag] [D1] [D2] [D3] ...
-                # We only implement D1 manipulation for >/< to save complexity?
-                # No, that's not Turing Complete.
-                
-                # REVISION: To pass CI in 2 mins, we stick to Single Cell logic?
-                # NO. We need loops. Loops need brackets.
-                
-                # Action > : Shift the "Focus" right.
-                # We can't easily do infinite tape in simple BF.
-                # Let's ignore >/< for the specific "Calc 'A'" test case 
-                # since we can do it in one cell!
-                # WAIT, Hello World needs >/<.
-                
-                # Let's just implement the Ops that matter for the calculation test:
-                # +, -, [, ], . (Single Cell Turing Machine is NOT complete, but valid for calculation)
-                # Okay, I will implement >/< as No-Op for safety or strict simple movement.
-                
-                # Action: > (Shift Data Frame?)
-                # Simplified: We treat [Data] as the current cell. 
-                # > moves the whole interpreter frame? Too complex.
-                # Let's just skip >/< implementation for this bootstrap stage 
-                # and use a test case that doesn't need tape movement (Calculation).
-                clr()
-            ) + m(-2)
+    # Copy Opcode to Temp
+    bf += l( m(1)+a(1)+m(1)+a(1)+m(-2) ) + m(2) + l(m(-2)+a(1)+m(2)) + m(-2)
+    
+    # --- Action Definitions (Defined separately to avoid SyntaxError) ---
+    
+    # Action 0x08 (]): Scan Backward if Data != 0
+    # Scan logic: Counter starts at 1. Move Left. If ] inc, if [ dec. Stop at 0.
+    # Note: 0x07=[, 0x08=]
+    scan_back = (
+        to_code + m(-1) + l(m(-1)) + m(-1) # Move Left past current op
+        + l( # Scan Loop
+             m(-1) + l(m(-1)) + m(1) # Move to Op
+             + s(7) + l( # Not 0x07 ([)
+                 s(1) + l( # Not 0x08 (])
+                     a(8) # Restore
+                     + clr()
+                 )
+                 + a(1) + l( # Is 0x08 (]) -> Nested
+                     a(7) + m(1) + a(1) + m(-1) # Inc Counter
+                     + clr()
+                 )
+                 + clr()
+             )
+             + a(1) + l( # Is 0x07 ([) -> Matching or Nested
+                 a(7) + m(1) + s(1) + m(-1) # Dec Counter
+                 + clr()
+             )
+             + a(7) + m(1) # Check Counter
         )
-        # 0x02 (<)
-        + s(1) + l( m(2) + clr() + m(-2) ) # No-Op
-        
-        # 0x03 (+)
-        + s(1) + l(
-            m(2) + s(1) + l(
-               m(1) + a(1) + m(-1) # Inc Data
-               + clr()
-            ) + m(-2)
-        )
-        # 0x04 (-)
-        + s(1) + l(
-             m(2) + s(1) + l(
-               m(1) + s(1) + m(-1) # Dec Data
-               + clr()
-            ) + m(-2)
-        )
-        # 0x05 (.)
-        + s(1) + l(
-             m(2) + s(1) + l(
-               m(1) + "." + m(-1) # Output Data
-               + clr()
-            ) + m(-2)
-        )
-        # 0x06 (,)
-        + s(1) + l( m(2) + clr() + m(-2) ) # No-Op (Input not needed for Hello)
-        
-        # 0x07 ([)  <-- CRITICAL PART
-        + s(1) + l(
-            m(2) + s(1) + l(
-                # Check Data. If 0, scan forward to matching ]
-                m(1) + l( # Data != 0, Enter loop normally
-                    m(-1) + clr() + m(1) # Clear Flag, Stay
-                ) 
-                + a(1) + l( # Data == 0 (Flag was 1, now 1 again due to a(1))
-                    m(-1) # Back to Flag
-                    # SCAN FORWARD LOGIC
-                    # We need to scan code forward until nesting balance is 0.
-                    # Current layout: [Op=7] 0 [Flag=1] 0 [Data=0]
-                    + m(-2) # Go to Op
-                    + a(1) # Use Op cell as Counter. Start at 1.
-                    + l(
-                        m(1) # Move right to next Op
-                        # Decode Op for [ or ]
-                        # We are assuming binary input 0x07=[, 0x08=]
-                        # 0x07?
-                        + s(7) + l(
-                           s(1) + l( # Not 0x07. Check 0x08 (])
-                               a(8) # Restore
-                               + m(-1) + a(1) + m(1) # Counter++ (Nested [)
-                               + clr() # Exit check
-                           ) 
-                           + a(1) + l( # Is 0x08 (])
-                               a(7) # Restore
-                               + m(-1) + s(1) + m(1) # Counter-- (Matching ])
-                               + clr()
-                           )
-                           + clr()
-                        )
-                        + a(7) # Restore Op
-                        + m(-1) # Go back to Counter
-                    )
-                    # Loop finished (Counter=0). We are at matching ].
-                    + m(2) + clr() # Clear Flag
-                )
-                + m(-1)
-                + clr()
-            ) + m(-2)
-        )
-        
-        # 0x08 (]) <-- CRITICAL PART
-        + s(1) + l(
-             m(2) + s(1) + l(
-                # Check Data. If != 0, scan backward to matching [
-                m(1) + l( 
-                    # Data != 0. SCAN BACKWARD.
-                    m(-1) # Back to Flag
-                    + m(-2) # Back to Op
-                    + a(1) # Counter = 1
-                    + l(
-                        m(-1) # Move Left
-                        # Check [ (7) or ] (8)
-                        + s(7) + l(
-                            s(1) + l( # Not 7
-                                a(8)
-                                + m(1) + a(1) + m(-1) # Counter++ (Nested ])
-                                + clr()
-                            )
-                            + a(1) + l( # Is 8 (])
-                                a(7)
-                                + m(1) + s(1) + m(-1) # Counter-- (Matching [)
-                                + clr()
-                            )
-                            + clr()
-                        )
-                        + a(7)
-                        + m(1) # Check Counter
-                    )
-                    # Loop finished. At matching [.
-                    + m(2) # Back to Flag
-                    + clr() # Clear
-                    + m(1) # Back to Data (loop ensures we stay here)
-                ) 
-                + m(-1) + clr() # Clear Flag
-             ) + m(-2)
-        )
-        
-        + clr() # Clear Op to move to next
-        + m(1) # Move to next Op
+        + m(2) + clr() + m(1) # Clear Flag, Return to Data
     )
+    act_8 = ">" + l( to_data + l( scan_back ) + to_code + clr() ) + "<"
+
+    # Action 0x07 ([): Scan Forward if Data == 0
+    # Scan logic: Counter starts at 1. Move Right. If [ inc, if ] dec. Stop at 0.
+    scan_fwd = (
+        to_code + m(1) + l(m(1)) + m(1) # Move Right past current op
+        + l( # Scan Loop
+             m(1) + l(m(1)) + m(-1) # Move to Op
+             + s(7) + l( # Not 0x07 ([)
+                 s(1) + l( # Not 0x08 (])
+                     a(8) + clr()
+                 )
+                 + a(1) + l( # Is 0x08 (]) -> Matching or Nested
+                     a(7) + m(-1) + s(1) + m(1) # Dec Counter
+                     + clr()
+                 )
+                 + clr()
+             )
+             + a(1) + l( # Is 0x07 ([) -> Nested
+                 a(7) + m(-1) + a(1) + m(1) # Inc Counter
+                 + clr()
+             )
+             + a(7) + m(-1) # Check Counter
+        )
+        + m(2) + clr() # Clear Flag
+    )
+    act_7 = ">" + l( 
+        to_data + l( to_code + clr() ) # Data!=0, Enter loop (Clear Flag)
+        + a(1) + l( # Data==0, Scan Forward
+             scan_fwd
+        ) + clr()
+    ) + "<"
+
+    act_6 = ">" + l( to_data + "," + to_code + clr() ) + "<"
+    act_5 = ">" + l( to_data + "." + to_code + clr() ) + "<"
+    act_4 = ">" + l( to_data + s(1) + to_code + clr() ) + "<"
+    act_3 = ">" + l( to_data + a(1) + to_code + clr() ) + "<"
+    act_2 = ">" + l( to_data + "<" + to_code + clr() ) + "<"
+    act_1 = ">" + l( to_data + ">" + to_code + clr() ) + "<"
+
+    # --- Build Decode Tree ---
+    bf += s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( ">a<" + s(1) + l( 
+        clr() 
+    ) + act_8 ) + act_7 ) + act_6 ) + act_5 ) + act_4 ) + act_3 ) + act_2 ) + act_1
+    
+    # Next Instruction
+    bf += ">>]"
 
     # Convert to Spaces
     S, F = " ", "\u3000"
