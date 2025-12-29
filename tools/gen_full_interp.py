@@ -9,86 +9,111 @@ def main():
     def clr(): return "[-]"
 
     # --- Full Interpreter Logic ---
-    # Memory Layout: [Code...] 0 [Data...]
-    # Start: Code is loaded, pointer at the end of Code.
+    # Memory Layout: 0 0 [StartMarker=1] [Code...] 0 [Temp/Op] [Flag] 0 [Data...]
     
     bf = ""
     # 1. Skip Header (S, P, A)
-    bf += ">" + ","*3 
+    bf += m(1) + ","*3 
     
     # 2. Read Code (until 0)
-    bf += ">>>+[,[>]+<[-]<]>>"
+    # Init: 0 0 1 ...
+    bf += m(3) + a(1) + l( "," + l( m(1) ) + a(1) + m(-1) + s(1) + m(-1) ) + m(2)
     
     # 3. Execution Loop
-    # Go to start of Code
-    bf += "[[>]+<[-]<]>"
+    # Go to start of Code (Find Marker 1)
+    bf += l( l( m(1) ) + a(1) + m(-1) + s(1) + m(-1) ) + m(1)
     
-    # Copy Opcode to check
-    bf += "[[>+>+<<-]>>[<<+>>-]<" 
+    # Copy Opcode to Temp
+    bf += l( l( m(1) + a(1) + m(1) + a(1) + m(-2) ) + m(2) + l( m(-2) + a(1) + m(2) ) + m(-1) + s(1) ) + m(-1)
     
-    # --- DECODE NEST ---
-    # Structure: s + l( next_check + action )
-    # If match, loop skipped, action executed.
-    # 8 opcodes to check: 0x01..0x08
+    # --- DECODE NEST (Flag Method) ---
+    # Structure:
+    # Op - 1
+    # [ Flag=1, Op-1 [ ... ] Flag_Check [ Action ] ]
+    # Flag_Check [ Action ]
     
-    # 0x01 (>)
-    bf += "s" + l(
-        # 0x02 (<)
-        "s" + l(
-            # 0x03 (+)
-            "s" + l(
-                # 0x04 (-)
-                "s" + l(
-                    # 0x05 (.)
-                    "s" + l(
-                        # 0x06 (,)
-                        "s" + l(
-                            # 0x07 ([)
-                            "s" + l(
-                                # 0x08 (])
-                                "s" + l(
-                                    # Unknown Op (Clear and exit)
-                                    clr()
-                                )
-                                # Action 0x08 (])
-                                + "m<[<]>[>]>m"
-                            )
-                            # Action 0x07 ([)
-                            + "m<[<]>+>[>]>m"
-                        )
-                        # Action 0x06 (,)
-                        + "m,m"
-                    )
-                    # Action 0x05 (.)
-                    + "m.m"
-                )
-                # Action 0x04 (-)
-                + "msm"
-            )
-            # Action 0x03 (+)
-            + "mam"
-        )
-        # Action 0x02 (<)
-        + "<"
-    )
-    # Action 0x01 (>)
-    + ">"
-    
-    # Next Instruction
-    + ">>]"
+    # Macros for movement between Code and Data
+    # From Temp: [<] goes to Marker(1). > goes to Code Start. [>] goes to End(0). > goes to Data.
+    to_data = "[<]>[>]>"
+    to_code = "<[<]>[>]<" 
 
-    # Replace macros to standard BF
-    # m: Move to Data (from Code)
-    # logic: [<] moves to start of code (0), > moves to Data separator (0), [>] moves to end of Data, > moves to new Data cell? 
-    # Actually the macro 'm' used in DBFI is specific: "[<]>[>]>"
-    # It assumes layout: 0 [Code] 0 [Data] 0
-    # From Code cell: [<] goes to left 0. > goes to Code start. [>] goes to right 0. > goes to Data start.
-    final_bf = bf.replace("m", "[<]>[>]>").replace("a","+").replace("s","-").replace("l","[")
-    
+    # We use explicit parentheses to avoid TypeError
+    bf += (
+        # 0x01 (>)
+        s(1) + l(
+            ">a<" + # Set Flag=1
+            # 0x02 (<)
+            s(1) + l(
+                ">a<" + # Set Flag=1
+                # 0x03 (+)
+                s(1) + l(
+                    ">a<" + 
+                    # 0x04 (-)
+                    s(1) + l(
+                        ">a<" +
+                        # 0x05 (.)
+                        s(1) + l(
+                            ">a<" +
+                            # 0x06 (,)
+                            s(1) + l(
+                                ">a<" +
+                                # 0x07 ([)
+                                s(1) + l(
+                                    ">a<" +
+                                    # 0x08 (])
+                                    s(1) + l(
+                                        clr() # Unknown Op
+                                    )
+                                    # Action 0x08 (])
+                                    + ">" + l(
+                                        to_data + l( # If Data!=0
+                                            to_code + m(-1) + l(m(-1)) + m(-1) # Move Left
+                                            + l( m(-1) + l(m(-1)) + m(1) ) # Scan back logic (simplified)
+                                        ) + to_code 
+                                        + clr() # Clear Flag
+                                    ) + "<"
+                                )
+                                # Action 0x07 ([)
+                                + ">" + l(
+                                    to_data + l(
+                                       to_code # Data!=0, Continue
+                                       + clr() # Clear Flag (Exit Action)
+                                    ) 
+                                    + a(1) # Set Flag=1 if Data==0 to trigger Scan
+                                    + l(
+                                        to_code + m(1) + l(m(1)) + m(1) # Move Right
+                                        + l( m(1) + l(m(1)) + m(-1) ) # Scan fwd logic (simplified)
+                                        + clr()
+                                    )
+                                    + clr() # Clear Flag
+                                ) + "<"
+                            )
+                            # Action 0x06 (,)
+                            + ">" + l( to_data + "," + to_code + clr() ) + "<"
+                        )
+                        # Action 0x05 (.)
+                        + ">" + l( to_data + "." + to_code + clr() ) + "<"
+                    )
+                    # Action 0x04 (-)
+                    + ">" + l( to_data + s(1) + to_code + clr() ) + "<"
+                )
+                # Action 0x03 (+)
+                + ">" + l( to_data + a(1) + to_code + clr() ) + "<"
+            )
+            # Action 0x02 (<)
+            + ">" + l( to_data + "<" + to_code + clr() ) + "<"
+        )
+        # Action 0x01 (>)
+        + ">" + l( to_data + ">" + to_code + clr() ) + "<"
+        
+        # Next Instruction
+        + ">>]"
+    )
+
     # Convert to Spaces
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
-    res = "".join([mapping[c] for c in final_bf if c in mapping])
+    res = "".join([mapping[c] for c in bf if c in mapping])
     print(res, end='')
 
 if __name__ == "__main__":
