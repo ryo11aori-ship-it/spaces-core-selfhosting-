@@ -1,71 +1,59 @@
 import sys
 
 def main():
-    # Brainfuck/Spaces Generator Helpers
+    # Helper functions
     def move(n): return ">"*n if n>0 else "<"*abs(n)
     def add(n): return "+"*n
     def sub(n): return "-"*n
     def loop(content): return "[" + content + "]"
-    
-    # ---------------------------------------------------------
-    # Logic: Linear Interpreter
-    # Layout: [Temp][InputChar][VirtualTape...]
-    # We treat Cell 0 as Temp, Cell 1 as Input Buffer.
-    # Virtual Tape starts at Cell 2.
-    # ---------------------------------------------------------
+    def clear(): return "[-]"
+
+    # --- Linear Interpreter Logic ---
+    # Memory Layout:
+    # Cell 0: Temp / Working
+    # Cell 1: Current Opcode (Input Buffer)
+    # Cell 2+: Virtual Tape (Target Program's Memory)
     
     bf = ""
     
-    # 1. Skip Header (Read 3 bytes: S, P, A)
-    # We assume valid input for Stage 2 to keep logic simple.
-    bf += move(1) + "," + "," + "," # Read 3 bytes into Cell 1 and discard
+    # 1. Header Skip (Read 'S', 'P', 'A' -> discard)
+    bf += move(1) + "," + "," + "," 
     
-    # 2. Main Fetch-Decode-Execute Loop
-    # Cell 1 holds the current Opcode.
-    bf += "," # Read first opcode
+    # 2. Main Loop: Read Opcode -> Execute -> Repeat
+    bf += "," # Read first opcode into Cell 1
     bf += loop(
-        # We are at Cell 1 (Opcode)
+        # Check Opcode in Cell 1
         
-        # Check 0x01 (>) PTR_INC ? (Not impl in linear simple version)
-        # Check 0x02 (<) PTR_DEC ? (Not impl in linear simple version)
-        
-        # Check 0x03 (+) VAL_INC
-        sub(3) # 0x03 -> 0
-        + loop( # If not 0 (it wasn't +)
-            sub(1) # Check 0x04 (-)
-            + loop( # If not 0 (it wasn't -)
-                sub(1) # Check 0x05 (.)
-                + loop( # If not 0 (it wasn't .)
-                     # Unknown or unimplemented op, just clear it to exit inner checks
-                     clear() 
+        # Case: + (0x03)
+        sub(3)
+        + loop( # If not 0x03
+            # Case: - (0x04) -> check offset from 0x03 is 1
+            sub(1)
+            + loop( # If not 0x04
+                # Case: . (0x05)
+                sub(1)
+                + loop( # If not 0x05
+                     clear() # Unknown op, ignore
                 )
-                # --- CASE: . (Output) ---
-                # Logic: Output value at Virtual Tape (Cell 2)
-                + move(1) + "." + move(-1) 
-                + clear() # Exit logic
+                # Action for . (Output Virtual Tape at Cell 2)
+                + move(1) + "." + move(-1)
+                + clear()
             )
-            # --- CASE: - (Dec) ---
-            # Logic: Dec Virtual Tape (Cell 2)
+            # Action for - (Dec Virtual Tape at Cell 2)
             + move(1) + sub(1) + move(-1)
             + clear()
         )
-        # --- CASE: + (Inc) ---
-        # Logic: Inc Virtual Tape (Cell 2)
+        # Action for + (Inc Virtual Tape at Cell 2)
         + move(1) + add(1) + move(-1)
         
         # Read Next Opcode
         + ","
     )
 
-    # ---------------------------------------------------------
-    # Convert BF to Spaces
-    # ---------------------------------------------------------
+    # --- Convert to Spaces ---
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     
-    def clear(): return "[-]"
-    
-    # Re-map the simplified logic above to full mapping
     res = ""
     for c in bf:
         if c in mapping: res += mapping[c]
