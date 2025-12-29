@@ -1,33 +1,90 @@
-#!/usr/bin/env python3
-# gen_compiler.py
-# Self-hosted BF -> SPA binary compiler
-# Reads BF source from stdin, writes SPA binary to stdout
-
 import sys
 
-OPCODE = {
-    '>': 0x01,
-    '<': 0x02,
-    '+': 0x03,
-    '-': 0x04,
-    '.': 0x05,
-    ',': 0x06,
-    '[': 0x07,
-    ']': 0x08,
-}
+# Stage 4: Self-Hosted Compiler (BF Source -> Spaces Binary)
+# Fixed: Strict pointer management to fix logic errors and prevent OOB access.
 
 def main():
-    data = sys.stdin.read()
-    out = bytearray()
+    bf = []
+    
+    def emit(s): bf.append(s)
+    
+    # --- 1. Header (SPA\x03) ---
+    # Use Cell 0 for Output Temp
+    emit('+' * 0x53); emit('.'); emit('[-]')
+    emit('+' * 0x50); emit('.'); emit('[-]')
+    emit('+' * 0x41); emit('.'); emit('[-]')
+    emit('+' * 0x03); emit('.'); emit('[-]')
 
-    # SPA header
-    out += b'SPA'
+    # --- 2. Main Loop ---
+    # Cell 0: Input Char
+    emit(',')
+    emit('[') 
 
-    for c in data:
-        if c in OPCODE:
-            out.append(OPCODE[c])
+    # Logic Structure:
+    # Cell 0: Char (Residual value from progressive subtraction)
+    # Cell 1: Temp (Copy of Char for checking)
+    # Cell 2: Flag (1 if Match, 0 if No Match) / Temp for Copy
 
-    sys.stdout.buffer.write(out)
+    def check_and_out(delta, out_opcode):
+        # 1. Subtract delta from Cell 0
+        emit('-' * delta)
+        
+        # 2. Copy Cell 0 to Cell 1 (Destructive to Cell 0, so use Cell 2 to restore)
+        # Start at 0.
+        emit('>[-]>[-]<<')           # Clear 1, 2. Ptr=0
+        emit('[>+>+<<-]')            # Move 0 -> 1, 2. Ptr=0
+        emit('>>[<<+>>-]')           # Move 2 -> 0. Ptr=2 (Loop ends at source)
+        emit('<<')                   # Ptr=0
+        
+        # 3. Check Cell 1. If 0, Set Flag (Cell 2) = 1.
+        # We are at 0. Go to 2.
+        emit('>>[-]+')               # Flag(2) = 1. Ptr=2
+        emit('<')                    # Ptr=1
+        emit('[>-<[-]]')             # If 1!=0, Flag(2)=0, Clear 1. Ptr=1
+        
+        # 4. Action based on Flag (Cell 2)
+        emit('>')                    # Ptr=2
+        emit('[')                    # If Flag=1 (Match)
+        emit('[-]')                  # Clear Flag
+        emit('>' + ('+'*out_opcode)) # Use Cell 3 for output val
+        emit('.')                    # Output
+        emit('[-]<')                 # Clear Cell 3, Back to 2
+        emit(']')
+        
+        # 5. Return to Cell 0
+        emit('<<')                   # 2 -> 0
+
+    # Chain of Checks (Sorted by ASCII value)
+    # + (43) -> Op 3
+    check_and_out(43, 3)
+    # , (44) -> Op 6 (Delta 1)
+    check_and_out(1, 6)
+    # - (45) -> Op 4 (Delta 1)
+    check_and_out(1, 4)
+    # . (46) -> Op 5 (Delta 1)
+    check_and_out(1, 5)
+    # < (60) -> Op 2 (Delta 14)
+    check_and_out(14, 2)
+    # > (62) -> Op 1 (Delta 2)
+    check_and_out(2, 1)
+    # [ (91) -> Op 7 (Delta 29)
+    check_and_out(29, 7)
+    # ] (93) -> Op 8 (Delta 2)
+    check_and_out(2, 8)
+
+    # Done checking. Cell 0 is residual junk. Clear it.
+    emit('[-]')
+    
+    # Read Next
+    emit(',')
+    emit(']')
+
+    # Convert to Spaces
+    S, F = " ", "\u3000"
+    mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
+    
+    full_bf = "".join(bf)
+    print("".join([mapping.get(c, '') for c in full_bf]), end='')
 
 if __name__ == "__main__":
     main()
