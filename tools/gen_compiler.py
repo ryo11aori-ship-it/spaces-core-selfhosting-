@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
-# gen_compiler.py (Route A)
-# Produce a raw binary: header "SPA" then opcode bytes (1..8) for a fixed Hello World BF program.
+# gen_compiler.py
+# Self-hosted BF -> SPA binary compiler
+# Reads BF source from stdin, writes SPA binary to stdout
 
 import sys
 
+OPCODE = {
+    '>': 0x01,
+    '<': 0x02,
+    '+': 0x03,
+    '-': 0x04,
+    '.': 0x05,
+    ',': 0x06,
+    '[': 0x07,
+    ']': 0x08,
+}
+
 def main():
-    bf = (
-        "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]"
-        ">>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
-    )
-
-    opcode = {
-        '>': 0x01,
-        '<': 0x02,
-        '+': 0x03,
-        '-': 0x04,
-        '.': 0x05,
-        ',': 0x06,
-        '[': 0x07,
-        ']': 0x08,
-    }
-
+    data = sys.stdin.read()
     out = bytearray()
+
+    # SPA header
     out += b'SPA'
-    for c in bf:
-        if c not in opcode:
-            # skip any unexpected char (safety)
-            continue
-        out.append(opcode[c])
+
+    for c in data:
+        if c in OPCODE:
+            out.append(OPCODE[c])
 
     sys.stdout.buffer.write(out)
 
