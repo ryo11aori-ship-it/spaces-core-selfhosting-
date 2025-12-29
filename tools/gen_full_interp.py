@@ -4,6 +4,10 @@ import sys
 # Features:
 # - Strictly flat indentation.
 # - Scan Logic consumes input explicitly inside Action 7.
+# 
+# NOTE (fix): avoid reusing Done_Flag slot as temporary copy buffer.
+# The original bug used IDX_FLAG as tmp in copy_val() and then cleared/used it as Done_Flag,
+# causing the decode pipeline to be corrupted. We add a dedicated copy temp IDX_COPY_TMP.
 
 def main():
     bf = []
@@ -29,6 +33,7 @@ def main():
         emit('[-]')
 
     def move_val(src, dst):
+        # move value from src -> dst (destructive on src)
         clear(dst)
         goto(src)
         emit('[')
@@ -39,6 +44,7 @@ def main():
         emit(']')
 
     def copy_val(src, dst, tmp):
+        # copy value src -> dst, using tmp as scratch, and restore src
         clear(dst)
         clear(tmp)
         goto(src)
@@ -48,8 +54,10 @@ def main():
         goto(tmp); emit('+')
         goto(src)
         emit(']')
+        # restore original src from tmp
         move_val(tmp, src)
 
+    # Index map (cells)
     IDX_OP = 0
     IDX_TMP = 1 
     IDX_FLAG = 2 
@@ -59,6 +67,7 @@ def main():
     IDX_IS_MATCH = 6
     IDX_SCAN_FLAG = 7
     IDX_CHAR = 8
+    IDX_COPY_TMP = 9   # <-- NEW: dedicated temporary for copy_val to avoid overwriting IDX_FLAG
 
     # --- 1. Header Consumption ---
     goto(IDX_OP); emit(',,,')
@@ -67,8 +76,8 @@ def main():
     goto(IDX_OP); emit(',')
     emit('[')
 
-    # Copy Op to Temp
-    copy_val(IDX_OP, IDX_TMP, IDX_FLAG)
+    # Copy Op to Temp  (use dedicated copy tmp so Done_Flag isn't reused)
+    copy_val(IDX_OP, IDX_TMP, IDX_COPY_TMP)
     
     # Initialize Done_Flag = 0
     clear(IDX_FLAG)
@@ -76,8 +85,13 @@ def main():
     # --- Helper to generate check block ---
     def check_opcode_and_act(action_func):
         # Check if Done_Flag (IDX_FLAG) == 0
+        # The sequence below implements:
+        # if Done_Flag == 0: run the check; else skip
         clear(IDX_EXTRA); emit('+')
-        goto(IDX_FLAG); emit('['); goto(IDX_EXTRA); emit('-'); goto(IDX_FLAG); emit('[-]+'); emit(']')
+        goto(IDX_FLAG); emit('[')        # if flag != 0
+        goto(IDX_EXTRA); emit('-')      # decrement marker to reflect flag set
+        goto(IDX_FLAG); emit('[-]+')    # clear flag and set it to 1 (net effect is to consume the branch)
+        emit(']')
         
         goto(IDX_EXTRA)
         emit('[')
@@ -88,7 +102,7 @@ def main():
         # Check if 0 (Match)
         clear(IDX_IS_MATCH); emit('+')
         goto(IDX_EXTRA_2); emit('[')
-        goto(IDX_IS_MATCH); emit('-') # Match=0
+        goto(IDX_IS_MATCH); emit('-') # Match=0 marker manipulation
         emit('-') # Decrement for next pass
         goto(IDX_TMP); emit('+') # Restore remaining
         goto(IDX_EXTRA_2)
@@ -162,14 +176,9 @@ def main():
         
         # Done Scanning.
         # The main loop expects us to read the *next* opcode.
-        # But we just read ']' (or 0) into IDX_CHAR.
-        # We need to *consume* it so the main loop reads the one *after*.
-        # Wait, if we read ']', the main loop will execute ']' next?
-        # No, ']' is a no-op in our linear interpreter.
-        # But if we don't consume it, the main loop reads it again?
-        # NO. We read into IDX_CHAR. The main loop reads into IDX_OP.
-        # They are different cells. The file pointer has moved.
-        # So we are good. The next main loop iteration will read the char *after* ']'.
+        # Note: we read into IDX_CHAR (separate from IDX_OP). The file pointer advanced,
+        # so the main loop's next ',' (into IDX_OP) will read the following byte.
+        # Therefore no extra consumption needed here.
 
     # --- Generate Checks 1..8 ---
     check_opcode_and_act(lambda: None) # 1
@@ -184,7 +193,7 @@ def main():
     # End Main Loop
     goto(IDX_OP); emit(']')
 
-    # Output
+    # Output: map BF to Spaces tokens
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     print("".join([mapping.get(c, '') for c in bf]), end='')
