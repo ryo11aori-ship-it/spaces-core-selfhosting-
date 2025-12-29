@@ -103,3 +103,63 @@ jobs:
             spaces/self/translator.spaces
             source.txt
             output.txt
+  # === Stage 4: Self-Hosted Compiler (Encoder) ===
+  # Spaces自身で「Spacesソース -> Spacesバイナリ」の変換を行う
+  verify-self-hosted-compiler:
+    runs-on: ubuntu-latest
+    needs: verify-linear-interp # Stage 3はスキップしてもOKだが、linearは必要
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Tools
+        run: |
+          mkdir -p bin spaces/self
+          gcc src/ref/vm.c -o bin/ref_vm
+          # We still need the C encoder to bootstrap the compiler generator?
+          # Actually, gen_compiler.py produces Spaces code directly from Python logic.
+          # So we just need the VM.
+
+      - name: Generate Self-Hosted Compiler
+        run: |
+          # Pythonツールが「コンパイラ(Spaces版)」を生成する
+          python3 tools/gen_compiler.py > spaces/self/compiler.spaces
+          echo "Compiler Size: $(stat -c%s spaces/self/compiler.spaces)"
+
+      - name: Compile 'Hello World' using Self-Hosted Compiler
+        run: |
+          # テスト用ソースコード (Hello World)
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+          python3 tools/generator.py hello.bf > hello.spaces
+
+          # VM 上で コンパイラ を実行。入力: hello.spaces -> 出力: hello.bin
+          # 以前は ./bin/encoder (C製) を使っていた場所を置換！
+          ./bin/ref_vm spaces/self/compiler.spaces < hello.spaces > hello_self_hosted.bin
+          
+          echo "Generated Binary Size: $(stat -c%s hello_self_hosted.bin)"
+          # ヘッダ確認 (53 50 41 03)
+          head -c 4 hello_self_hosted.bin | hexdump -C
+
+      - name: Run the Compiled Binary
+        run: |
+          # 生成されたバイナリが正しく動くか (VMで実行)
+          ./bin/ref_vm hello_self_hosted.bin > output.txt
+          
+          cat output.txt
+          if grep -q "Hello World!" output.txt; then
+            echo "🎉 STAGE 4 COMPLETE: Self-Hosted Compiler works!"
+          else
+            echo "❌ Failed: Binary did not produce expected output."
+            exit 1
+          fi
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-artifacts
+          path: |
+            spaces/self/compiler.spaces
+            hello.spaces
+            hello_self_hosted.bin
+            output.txt
+
