@@ -1,4 +1,4 @@
-name: Spaces CI (Stage 0 & 1)
+name: Spaces CI (Stage 0-2)
 
 on:
   push:
@@ -12,22 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. コンパイル
       - name: Compile Reference VM
         run: |
           mkdir -p bin
           gcc src/ref/vm.c -o bin/ref_vm
 
-      # 2. ツール動作確認
       - name: Verify Generator Tool
         run: |
-          # '+' (Increment) を生成して確認
           python3 tools/generator.py "+" > test.spaces
-          # サイズ確認 (UTF-8で Space(1)+Full(3)+Space(1) = 5 bytes)
           ls -l test.spaces
           if [ $(stat -c%s test.spaces) -ne 5 ]; then exit 1; fi
 
-      # 3. 結合テスト (Hello World)
       - name: Integration Test (Hello World)
         run: |
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
@@ -38,25 +33,19 @@ jobs:
   # === Stage 1: Encoder の動作確認 ===
   verify-encoder:
     runs-on: ubuntu-latest
-    # Stage 0 が成功しないと実行しない（依存関係を作る）場合は needs: verify-ref-vm をつける
-    # 今回は並列実行でもOKなのでつけません
-    
     steps:
       - uses: actions/checkout@v4
 
-      # 1. コンパイル (Reference VM & Encoder)
       - name: Compile Tools
         run: |
           mkdir -p bin
           gcc src/ref/vm.c -o bin/ref_vm
           gcc tools/encoder.c -o bin/encoder
 
-      # 2. テストデータ作成
       - name: Generate Test Source
         run: |
           python3 tools/generator.py "+" > test.spaces
 
-      # 3. エンコード実行 & 検証
       - name: Run Encoder & Verify Binary
         run: |
           ./bin/encoder test.spaces > test.bin
@@ -64,94 +53,44 @@ jobs:
           echo "Binary Dump:"
           od -t x1 test.bin
           
-          # 検証ロジック: Header(SPA) + Opcode(+)
+          # Header(SPA) + Opcode(+) check
           HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
           if [ "$HEADER" = "53504103" ]; then
             echo "✅ Encoder Verification Passed!"
           else
             echo "❌ Failed! Expected 53504103 but got $HEADER"
             exit 1
-  # === Stage 2: Linear Self-Interpreter Verification ===
-  verify-interp:
-    runs-on: ubuntu-latest
-    needs: [verify-encoder] # Stage 1完了後に実行
-    steps:
-      - uses: actions/checkout@v4
-
-      # 1. コンパイル (Ref VM & Encoder)
-      - name: Compile Tools
-        run: |
-          mkdir -p bin
-          gcc src/ref/vm.c -o bin/ref_vm
-          gcc tools/encoder.c -o bin/encoder
-
-      # 2. インタプリタ生成 (Spacesコード)
-      - name: Generate Self-Interpreter
-        run: |
-          mkdir -p spaces/self
-          python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
-
-      # 3. テスト入力作成 ("A"を出力するプログラム)
-      - name: Create Test Input (Print 'A')
-        run: |
-          # '+' * 65 + '.'
-          # generator.pyは引数を文字列として扱える
-          python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
-          
-          # バイナリ化 (これがインタプリタの入力になる)
-          ./bin/encoder print_a.spaces > print_a.bin
-
-      # 4. 実行 & 検証
-      - name: Run Self-Interpreter
-        run: |
-          # VM (実行くん) で インタプリタ (解釈くん) を動かし、入力として バイナリ (データ) を渡す
-          # 構造: VM( Interpreter( Data ) )
-          ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
-          
-          # 確認
-          cat output.txt
-          RESULT=$(cat output.txt)
-          if [ "$RESULT" = "A" ]; then
-            echo "✅ Self-Interpreter Passed! Output is 'A'."
-          else
-            echo "❌ Failed! Expected 'A' but got '$RESULT'"
-            exit 1
           fi
+
   # === Stage 2: Linear Self-Interpreter Verification ===
   verify-interp:
     runs-on: ubuntu-latest
-    needs: [verify-encoder] # Stage 1 が終わったら実行
+    needs: [verify-encoder]
     steps:
       - uses: actions/checkout@v4
 
-      # 1. ツール再コンパイル (CI環境はJobごとにリセットされるため)
       - name: Compile Tools
         run: |
           mkdir -p bin spaces/self
           gcc src/ref/vm.c -o bin/ref_vm
           gcc tools/encoder.c -o bin/encoder
 
-      # 2. インタプリタ生成 (Spacesコード)
       - name: Generate Self-Interpreter
         run: |
+          # 以前作成依頼した gen_linear_interp.py が必要です
           python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
 
-      # 3. テスト入力作成 ("A"を出力するプログラム)
       - name: Create Test Input (Print 'A')
         run: |
           # '+' * 65 + '.'
           python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
-          
-          # バイナリ化 (これがインタプリタへの入力データになる)
           ./bin/encoder print_a.spaces > print_a.bin
 
-      # 4. 実行 & 検証 (ここがセルフホスティングの瞬間！)
-      # VM( Interpreter( Data ) ) という入れ子構造で実行
       - name: Run Self-Interpreter
         run: |
+          # VM( Interpreter( Data ) )
           ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
           
-          # 結果確認
           cat output.txt
           RESULT=$(cat output.txt)
           if [ "$RESULT" = "A" ]; then
@@ -160,4 +99,3 @@ jobs:
             echo "❌ Failed! Expected 'A' but got '$RESULT'"
             exit 1
           fi
-
