@@ -1,4 +1,4 @@
-name: Stage 0 - Reference VM Verification
+name: Spaces CI (Stage 0 & 1)
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # === Stage 0: Reference VM の動作確認 ===
   verify-ref-vm:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +22,6 @@ jobs:
       - name: Verify Generator Tool
         run: |
           # '+' (Increment) を生成して確認
-          # SFS = " \u3000 "
           python3 tools/generator.py "+" > test.spaces
           # サイズ確認 (UTF-8で Space(1)+Full(3)+Space(1) = 5 bytes)
           ls -l test.spaces
@@ -30,28 +30,17 @@ jobs:
       # 3. 結合テスト (Hello World)
       - name: Integration Test (Hello World)
         run: |
-          # BFコード
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          
-          # Spacesに変換
           python3 tools/generator.py hello.bf > hello.spaces
-          
-          # VMで実行
           ./bin/ref_vm hello.spaces > output.txt
-          
-          # 検証
-          cat output.txt
           grep "Hello World!" output.txt
-name: Stage 1 - Encoding Verification
 
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
-
-jobs:
+  # === Stage 1: Encoder の動作確認 ===
   verify-encoder:
     runs-on: ubuntu-latest
+    # Stage 0 が成功しないと実行しない（依存関係を作る）場合は needs: verify-ref-vm をつける
+    # 今回は並列実行でもOKなのでつけません
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -65,26 +54,17 @@ jobs:
       # 2. テストデータ作成
       - name: Generate Test Source
         run: |
-          # "+" (Increment) のSpacesコードを生成
-          # Mapping: + = SFS (010)
           python3 tools/generator.py "+" > test.spaces
 
       # 3. エンコード実行 & 検証
       - name: Run Encoder & Verify Binary
         run: |
-          # バイナリへ変換
           ./bin/encoder test.spaces > test.bin
           
-          # バイナリの中身を確認 (od -t x1 で16進数ダンプ)
           echo "Binary Dump:"
           od -t x1 test.bin
           
-          # 検証ロジック:
-          # Header: S(53) P(50) A(41)
-          # Body:   +(010 -> 0x03)
-          # Expected: 53 50 41 03
-          
-          # 先頭4バイトを取り出して比較
+          # 検証ロジック: Header(SPA) + Opcode(+)
           HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
           if [ "$HEADER" = "53504103" ]; then
             echo "✅ Encoder Verification Passed!"
@@ -92,4 +72,3 @@ jobs:
             echo "❌ Failed! Expected 53504103 but got $HEADER"
             exit 1
           fi
-
