@@ -42,3 +42,54 @@ jobs:
           # 検証
           cat output.txt
           grep "Hello World!" output.txt
+name: Stage 1 - Encoding Verification
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  verify-encoder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. コンパイル (Reference VM & Encoder)
+      - name: Compile Tools
+        run: |
+          mkdir -p bin
+          gcc src/ref/vm.c -o bin/ref_vm
+          gcc tools/encoder.c -o bin/encoder
+
+      # 2. テストデータ作成
+      - name: Generate Test Source
+        run: |
+          # "+" (Increment) のSpacesコードを生成
+          # Mapping: + = SFS (010)
+          python3 tools/generator.py "+" > test.spaces
+
+      # 3. エンコード実行 & 検証
+      - name: Run Encoder & Verify Binary
+        run: |
+          # バイナリへ変換
+          ./bin/encoder test.spaces > test.bin
+          
+          # バイナリの中身を確認 (od -t x1 で16進数ダンプ)
+          echo "Binary Dump:"
+          od -t x1 test.bin
+          
+          # 検証ロジック:
+          # Header: S(53) P(50) A(41)
+          # Body:   +(010 -> 0x03)
+          # Expected: 53 50 41 03
+          
+          # 先頭4バイトを取り出して比較
+          HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
+          if [ "$HEADER" = "53504103" ]; then
+            echo "✅ Encoder Verification Passed!"
+          else
+            echo "❌ Failed! Expected 53504103 but got $HEADER"
+            exit 1
+          fi
+
