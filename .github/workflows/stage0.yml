@@ -1,4 +1,4 @@
-name: Spaces CI (Self-Hosted Compiler Minimal)
+name: Spaces CI (Stage 4 Self-Hosted VM)
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage4-selfhost:
+  stage4-vm-selfhost:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,10 +18,21 @@ jobs:
           mkdir -p bin
           gcc src/ref/vm.c -o bin/ref_vm
 
-      - name: Generate self-hosted binary directly (Route A)
+      - name: Generate self-hosted compiler (Spaces)
         run: |
-          python3 tools/gen_compiler.py > hello_selfhost.bin
-          echo "=== selfhost binary info ==="
+          mkdir -p spaces/self
+          python3 tools/gen_compiler.py > spaces/self/compiler.spaces
+          echo "compiler.spaces size:"
+          wc -c spaces/self/compiler.spaces
+
+      - name: Prepare BF input
+        run: |
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+
+      - name: Run self-hosted compiler inside VM
+        run: |
+          ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello_selfhost.bin
+          echo "=== selfhost binary ==="
           ls -l hello_selfhost.bin
           head -c 32 hello_selfhost.bin | hexdump -C
 
@@ -34,9 +45,9 @@ jobs:
       - name: Verify output
         run: |
           if grep -q "Hello World!" output.txt; then
-            echo "🎉 STAGE 4 COMPLETE: Self-hosted compiler works"
+            echo "🎉 STAGE 4 COMPLETE: True VM self-hosting achieved"
           else
-            echo "❌ Output mismatch"
+            echo "❌ Stage 4 failed"
             exit 1
           fi
 
@@ -44,7 +55,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage4-artifacts
+          name: stage4-vm-selfhost
           path: |
+            spaces/self/compiler.spaces
             hello_selfhost.bin
             output.txt
