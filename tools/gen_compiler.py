@@ -1,7 +1,7 @@
 import sys
 
 # Stage 4: Self-Hosted Compiler (BF Source -> Spaces Binary)
-# Fixed: Pointer movement bug (returning from Flag cell to Char cell).
+# Fixed: Strict pointer arithmetic to prevent Segfault (Cell -1 access).
 
 def main():
     bf = []
@@ -9,8 +9,7 @@ def main():
     def emit(s): bf.append(s)
     
     # --- 1. Header (SPA\x03) ---
-    # Use Cell 0 for Output Temp initially
-    # Output S P A \x03
+    # Use Cell 0 for Output Temp
     emit('+' * 0x53); emit('.'); emit('[-]')
     emit('+' * 0x50); emit('.'); emit('[-]')
     emit('+' * 0x41); emit('.'); emit('[-]')
@@ -23,9 +22,9 @@ def main():
 
     # Logic:
     # Cell 0: Char (Residual)
-    # Cell 1: Temp (for copying)
-    # Cell 2: Work (for checking)
-    # Cell 3: Flag (Result)
+    # Cell 1: Temp
+    # Cell 2: Check Copy
+    # Cell 3: Flag / Output
 
     def check_and_out(delta, out_opcode):
         # 1. Subtract delta from Cell 0
@@ -33,34 +32,32 @@ def main():
         
         # 2. Copy Cell 0 to Cell 2 using Cell 1 as temp
         # Start at 0.
-        emit('>[-]>[-]<<') # Clear 1, 2
-        emit('[>+>+<<-]>>[<<+>>-]<<') # Copy 0->1->0&2. Result: 0=Char, 1=0, 2=Char
+        emit('>[-]>[-]<<') # Clear 1, 2. Return to 0.
+        emit('[>+>+<<-]>>[<<+>>-]<<') # Copy 0->1->0&2. Return to 0.
         
         # 3. Check if Cell 2 is 0
-        emit('>>') # Go to 2
-        emit('[-]+<') # Clear 2, Set 2=1 (Wait, simplified check logic below)
+        # Go to Cell 3 (Flag), Set to 1
+        emit('>>>') # 0 -> 3
+        emit('[-]+') # Flag = 1
+        emit('<') # 3 -> 2
         
-        # Check Zero Logic on Cell 2:
-        # We want Flag (Cell 3) = 1 if Cell 2 == 0.
-        # Set Flag=1. If Cell 2 != 0, Set Flag=0.
+        # If Cell 2 is NOT 0: Clear Flag (3) and Clear Cell 2
+        emit('[>[-]<[-]]')
         
-        emit('>[-]+') # Set Cell 3 (Flag) = 1
-        emit('<') # Back to Cell 2
-        emit('[>-<[-]]') # If Cell 2!=0, Dec Flag, Clear Cell 2.
+        # Now we are at Cell 2 (which is 0).
         
-        # 4. If Flag (Cell 3) is 1, Output
-        emit('>') # Go to Cell 3
+        # 4. Check Flag at Cell 3
+        emit('>') # 2 -> 3
         emit('[')
         # MATCHED!
-        # Reuse Cell 3 for output (Clear Flag first)
-        emit('[-]') 
+        emit('[-]') # Clear Flag
         emit('+' * out_opcode)
         emit('.')
-        emit('[-]')
+        emit('[-]') # Clear Output
         emit(']')
         
         # 5. Return to Cell 0
-        # We are at Cell 3.
+        # We are currently at Cell 3.
         emit('<<<') # 3 -> 0
 
     # Chain of Checks (Sorted by ASCII value)
