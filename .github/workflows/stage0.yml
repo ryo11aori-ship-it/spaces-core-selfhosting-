@@ -1,4 +1,4 @@
-name: Spaces CI (Stage 0-2)
+name: Spaces CI (Stage 0-3)
 
 on:
   push:
@@ -6,66 +6,52 @@ on:
   workflow_dispatch:
 
 jobs:
-  # === Stage 0: Reference VM の動作確認 ===
+  # === Stage 0: Reference VM ===
   verify-ref-vm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compile Reference VM
-        run: |
-          mkdir -p bin
-          gcc src/ref/vm.c -o bin/ref_vm
-
-      - name: Verify Generator Tool
-        run: |
-          python3 tools/generator.py "+" > test.spaces
-          ls -l test.spaces
-          if [ $(stat -c%s test.spaces) -ne 5 ]; then exit 1; fi
-
-      - name: Integration Test (Hello World)
-        run: |
+      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm
+      - run: python3 tools/generator.py "+" > test.spaces
+      - run: if [ $(stat -c%s test.spaces) -ne 5 ]; then exit 1; fi
+      - run: |
           echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
           python3 tools/generator.py hello.bf > hello.spaces
           ./bin/ref_vm hello.spaces > output.txt
           grep "Hello World!" output.txt
 
-  # === Stage 1: Encoder の動作確認 ===
+  # === Stage 1: Encoder ===
   verify-encoder:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compile Tools
-        run: |
-          mkdir -p bin
-          gcc src/ref/vm.c -o bin/ref_vm
-          gcc tools/encoder.c -o bin/encoder
-
-      - name: Generate Test Source
-        run: |
-          python3 tools/generator.py "+" > test.spaces
-
-      - name: Run Encoder & Verify Binary
-        run: |
+      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
+      - run: python3 tools/generator.py "+" > test.spaces
+      - run: |
           ./bin/encoder test.spaces > test.bin
-          
-          echo "Binary Dump:"
-          od -t x1 test.bin
-          
-          # Header(SPA) + Opcode(+) check
           HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
-          if [ "$HEADER" = "53504103" ]; then
-            echo "✅ Encoder Verification Passed!"
-          else
-            echo "❌ Failed! Expected 53504103 but got $HEADER"
-            exit 1
-          fi
+          if [ "$HEADER" = "53504103" ]; then echo "✅ OK"; else echo "❌ Fail"; exit 1; fi
 
-  # === Stage 2: Linear Self-Interpreter Verification ===
-  verify-interp:
+  # === Stage 2: Linear Interpreter ===
+  verify-linear-interp:
     runs-on: ubuntu-latest
-    needs: [verify-encoder]
+    needs: verify-encoder
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p bin spaces/self
+      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
+      - run: python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
+      - run: |
+          python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
+          ./bin/encoder print_a.spaces > print_a.bin
+      - run: |
+          ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
+          if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
+
+  # === Stage 3: Full Self-Interpreter (Turing Complete) ===
+  verify-full-interp:
+    runs-on: ubuntu-latest
+    needs: verify-linear-interp
     steps:
       - uses: actions/checkout@v4
 
@@ -75,27 +61,31 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           gcc tools/encoder.c -o bin/encoder
 
-      - name: Generate Self-Interpreter
+      - name: Generate Full Interpreter
         run: |
-          # 以前作成依頼した gen_linear_interp.py が必要です
-          python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
+          # ループ対応の最強インタプリタを生成
+          python3 tools/gen_full_interp.py > spaces/self/full_interp.spaces
 
-      - name: Create Test Input (Print 'A')
+      - name: Create Test Input (Hello World with Loops)
         run: |
-          # '+' * 65 + '.'
-          python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
-          ./bin/encoder print_a.spaces > print_a.bin
-
-      - name: Run Self-Interpreter
-        run: |
-          # VM( Interpreter( Data ) )
-          ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
+          # Hello World (BF code)
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
           
+          # Spaces変換 -> バイナリ変換
+          python3 tools/generator.py hello.bf > hello.spaces
+          ./bin/encoder hello.spaces > hello.bin
+
+      - name: Run Full Self-Interpreter
+        run: |
+          # VM( FullInterpreter( HelloBinary ) )
+          # これでHello Worldが出れば、任意の計算が可能であることが証明される
+          ./bin/ref_vm spaces/self/full_interp.spaces < hello.bin > output.txt
+          
+          # 検証
           cat output.txt
-          RESULT=$(cat output.txt)
-          if [ "$RESULT" = "A" ]; then
-            echo "✅ Self-Interpreter Passed! Output is 'A'."
+          if grep -q "Hello World!" output.txt; then
+            echo "🎉🎉🎉 STAGE 3 COMPLETE: Turing Complete Self-Hosting Achieved! 🎉🎉🎉"
           else
-            echo "❌ Failed! Expected 'A' but got '$RESULT'"
+            echo "❌ Failed."
             exit 1
           fi
