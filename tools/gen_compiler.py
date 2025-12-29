@@ -1,7 +1,7 @@
 import sys
 
 # Stage 4: Self-Hosted Compiler (BF Source -> Spaces Binary)
-# Fixed: Strict pointer management to fix logic errors and prevent OOB access.
+# Fixed: Switched to Non-Progressive (Absolute) checks to eliminate cumulative errors.
 
 def main():
     bf = []
@@ -9,7 +9,6 @@ def main():
     def emit(s): bf.append(s)
     
     # --- 1. Header (SPA\x03) ---
-    # Use Cell 0 for Output Temp
     emit('+' * 0x53); emit('.'); emit('[-]')
     emit('+' * 0x50); emit('.'); emit('[-]')
     emit('+' * 0x41); emit('.'); emit('[-]')
@@ -21,58 +20,52 @@ def main():
     emit('[') 
 
     # Logic Structure:
-    # Cell 0: Char (Residual value from progressive subtraction)
+    # Cell 0: Char (Preserved)
     # Cell 1: Temp (Copy of Char for checking)
-    # Cell 2: Flag (1 if Match, 0 if No Match) / Temp for Copy
+    # Cell 2: Backup (To restore Cell 0)
+    # Cell 3: Flag / Output
 
-    def check_and_out(delta, out_opcode):
-        # 1. Subtract delta from Cell 0
-        emit('-' * delta)
-        
-        # 2. Copy Cell 0 to Cell 1 (Destructive to Cell 0, so use Cell 2 to restore)
-        # Start at 0.
+    def check_and_out(ascii_val, out_opcode):
+        # 1. Copy Cell 0 to Cell 1 and Cell 2
+        #    Cell 0 is cleared in process, then restored from Cell 2 later.
         emit('>[-]>[-]<<')           # Clear 1, 2. Ptr=0
         emit('[>+>+<<-]')            # Move 0 -> 1, 2. Ptr=0
-        emit('>>[<<+>>-]')           # Move 2 -> 0. Ptr=2 (Loop ends at source)
-        emit('<<')                   # Ptr=0
         
-        # 3. Check Cell 1. If 0, Set Flag (Cell 2) = 1.
-        # We are at 0. Go to 2.
-        emit('>>[-]+')               # Flag(2) = 1. Ptr=2
-        emit('<')                    # Ptr=1
-        emit('[>-<[-]]')             # If 1!=0, Flag(2)=0, Clear 1. Ptr=1
+        # 2. Subtract ascii_val from Cell 1
+        emit('>')                    # Ptr=1
+        emit('-' * ascii_val)
         
-        # 4. Action based on Flag (Cell 2)
-        emit('>')                    # Ptr=2
+        # 3. Check Cell 1. If 0, Set Flag (Cell 3) = 1.
+        #    (We use Cell 3 as Flag to avoid messing up Cell 2)
+        emit('>>[-]+')               # Flag(3) = 1. Ptr=3
+        emit('<<')                   # Ptr=1
+        emit('[>>-<<[-]]')           # If 1!=0, Flag(3)=0, Clear 1. Ptr=1
+        
+        # 4. Action based on Flag (Cell 3)
+        emit('>>')                   # Ptr=3
         emit('[')                    # If Flag=1 (Match)
         emit('[-]')                  # Clear Flag
-        emit('>' + ('+'*out_opcode)) # Use Cell 3 for output val
+        emit('+' * out_opcode)       # Set Output
         emit('.')                    # Output
-        emit('[-]<')                 # Clear Cell 3, Back to 2
+        emit('[-]')                  # Clear Output
         emit(']')
         
-        # 5. Return to Cell 0
-        emit('<<')                   # 2 -> 0
+        # 5. Restore Cell 0 from Cell 2
+        emit('<')                    # Ptr=2
+        emit('[<<+>>-]')             # Move 2 -> 0. Ptr=2
+        emit('<<')                   # Ptr=0
 
-    # Chain of Checks (Sorted by ASCII value)
-    # + (43) -> Op 3
-    check_and_out(43, 3)
-    # , (44) -> Op 6 (Delta 1)
-    check_and_out(1, 6)
-    # - (45) -> Op 4 (Delta 1)
-    check_and_out(1, 4)
-    # . (46) -> Op 5 (Delta 1)
-    check_and_out(1, 5)
-    # < (60) -> Op 2 (Delta 14)
-    check_and_out(14, 2)
-    # > (62) -> Op 1 (Delta 2)
-    check_and_out(2, 1)
-    # [ (91) -> Op 7 (Delta 29)
-    check_and_out(29, 7)
-    # ] (93) -> Op 8 (Delta 2)
-    check_and_out(2, 8)
+    # Absolute Checks (Order doesn't matter, but sorted is nice)
+    check_and_out(43, 3) # +
+    check_and_out(44, 6) # ,
+    check_and_out(45, 4) # -
+    check_and_out(46, 5) # .
+    check_and_out(60, 2) # <
+    check_and_out(62, 1) # >
+    check_and_out(91, 7) # [
+    check_and_out(93, 8) # ]
 
-    # Done checking. Cell 0 is residual junk. Clear it.
+    # Done checking. Clear Cell 0
     emit('[-]')
     
     # Read Next
