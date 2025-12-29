@@ -1,0 +1,44 @@
+name: Stage 0 - Reference VM Verification
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  verify-ref-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. コンパイル
+      - name: Compile Reference VM
+        run: |
+          mkdir -p bin
+          gcc src/ref/vm.c -o bin/ref_vm
+
+      # 2. ツール動作確認
+      - name: Verify Generator Tool
+        run: |
+          # '+' (Increment) を生成して確認
+          # SFS = " \u3000 "
+          python3 tools/generator.py "+" > test.spaces
+          # サイズ確認 (UTF-8で Space(1)+Full(3)+Space(1) = 5 bytes)
+          ls -l test.spaces
+          if [ $(stat -c%s test.spaces) -ne 5 ]; then exit 1; fi
+
+      # 3. 結合テスト (Hello World)
+      - name: Integration Test (Hello World)
+        run: |
+          # BFコード
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+          
+          # Spacesに変換
+          python3 tools/generator.py hello.bf > hello.spaces
+          
+          # VMで実行
+          ./bin/ref_vm hello.spaces > output.txt
+          
+          # 検証
+          cat output.txt
+          grep "Hello World!" output.txt
