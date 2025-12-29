@@ -1,13 +1,6 @@
 import sys
 
-# Stage 3: Robust Interpreter with "Linear Consumption" Scan
-# Features:
-# - Strictly flat indentation.
-# - Scan Logic consumes input explicitly inside Action 7.
-# 
-# NOTE (fix): avoid reusing Done_Flag slot as temporary copy buffer.
-# The original bug used IDX_FLAG as tmp in copy_val() and then cleared/used it as Done_Flag,
-# causing the decode pipeline to be corrupted. We add a dedicated copy temp IDX_COPY_TMP.
+# Stage 3: Robust Interpreter with correct linear opcode consumption
 
 def main():
     bf = []
@@ -16,187 +9,135 @@ def main():
     def emit(s):
         nonlocal cur
         bf.append(s)
-        moves = [c for c in s if c in '<>']
-        if moves:
-            cur += moves.count('>') - moves.count('<')
+        for c in s:
+            if c == '>': cur += 1
+            elif c == '<': cur -= 1
 
-    def goto(idx):
+    def goto(i):
         nonlocal cur
-        if idx > cur:
-            emit('>' * (idx - cur))
-        elif idx < cur:
-            emit('<' * (cur - idx))
-        cur = idx
+        if i > cur: emit('>' * (i - cur))
+        elif i < cur: emit('<' * (cur - i))
+        cur = i
 
-    def clear(idx):
-        goto(idx)
-        emit('[-]')
+    def clear(i):
+        goto(i); emit('[-]')
 
-    def move_val(src, dst):
-        # move value from src -> dst (destructive on src)
+    def move(src, dst):
         clear(dst)
-        goto(src)
-        emit('[')
+        goto(src); emit('[')
         emit('-')
-        goto(dst)
-        emit('+')
-        goto(src)
-        emit(']')
+        goto(dst); emit('+')
+        goto(src); emit(']')
 
-    def copy_val(src, dst, tmp):
-        # copy value src -> dst, using tmp as scratch, and restore src
-        clear(dst)
-        clear(tmp)
-        goto(src)
-        emit('[')
+    def copy(src, dst, tmp):
+        clear(dst); clear(tmp)
+        goto(src); emit('[')
         emit('-')
         goto(dst); emit('+')
         goto(tmp); emit('+')
-        goto(src)
-        emit(']')
-        # restore original src from tmp
-        move_val(tmp, src)
+        goto(src); emit(']')
+        move(tmp, src)
 
-    # Index map (cells)
+    # Memory layout
     IDX_OP = 0
-    IDX_TMP = 1 
-    IDX_FLAG = 2 
+    IDX_TMP = 1
+    IDX_DONE = 2
     IDX_DATA = 3
-    IDX_EXTRA = 4
-    IDX_EXTRA_2 = 5
-    IDX_IS_MATCH = 6
-    IDX_SCAN_FLAG = 7
+    IDX_A = 4
+    IDX_B = 5
+    IDX_MATCH = 6
+    IDX_SCAN = 7
     IDX_CHAR = 8
-    IDX_COPY_TMP = 9   # <-- NEW: dedicated temporary for copy_val to avoid overwriting IDX_FLAG
+    IDX_COPY_TMP = 9
 
-    # --- 1. Header Consumption ---
+    # --- Header ---
     goto(IDX_OP); emit(',,,')
 
-    # --- 2. Main Loop ---
+    # --- Initial opcode read ---
     goto(IDX_OP); emit(',')
+
+    # --- Main loop: while opcode != 0 ---
     emit('[')
 
-    # Copy Op to Temp  (use dedicated copy tmp so Done_Flag isn't reused)
-    copy_val(IDX_OP, IDX_TMP, IDX_COPY_TMP)
-    
-    # Initialize Done_Flag = 0
-    clear(IDX_FLAG)
+    # Copy opcode
+    copy(IDX_OP, IDX_TMP, IDX_COPY_TMP)
+    clear(IDX_DONE)
 
-    # --- Helper to generate check block ---
-    def check_opcode_and_act(action_func):
-        # Check if Done_Flag (IDX_FLAG) == 0
-        # The sequence below implements:
-        # if Done_Flag == 0: run the check; else skip
-        clear(IDX_EXTRA); emit('+')
-        goto(IDX_FLAG); emit('[')        # if flag != 0
-        goto(IDX_EXTRA); emit('-')      # decrement marker to reflect flag set
-        goto(IDX_FLAG); emit('[-]+')    # clear flag and set it to 1 (net effect is to consume the branch)
-        emit(']')
-        
-        goto(IDX_EXTRA)
-        emit('[')
-        # Not Done Yet
-        move_val(IDX_TMP, IDX_EXTRA_2)
-        goto(IDX_EXTRA_2); emit('-')
-        
-        # Check if 0 (Match)
-        clear(IDX_IS_MATCH); emit('+')
-        goto(IDX_EXTRA_2); emit('[')
-        goto(IDX_IS_MATCH); emit('-') # Match=0 marker manipulation
-        emit('-') # Decrement for next pass
-        goto(IDX_TMP); emit('+') # Restore remaining
-        goto(IDX_EXTRA_2)
-        emit(']')
-        
-        goto(IDX_IS_MATCH)
-        emit('[')
-        # MATCHED!
-        action_func()
-        goto(IDX_FLAG); emit('+') # Set Done_Flag=1
-        goto(IDX_IS_MATCH); emit('-')
-        emit(']')
-        
-        clear(IDX_EXTRA)
+    def check(act):
+        clear(IDX_A); emit('+')
+        goto(IDX_DONE); emit('[')
+        goto(IDX_A); emit('-')
+        goto(IDX_DONE); emit('[-]+')
         emit(']')
 
-    # --- Define Actions ---
-    def act_plus():
-        goto(IDX_DATA); emit('+')
+        goto(IDX_A); emit('[')
+        move(IDX_TMP, IDX_B)
+        goto(IDX_B); emit('-')
 
-    def act_minus():
-        goto(IDX_DATA); emit('-')
-
-    def act_dot():
-        goto(IDX_DATA); emit('.')
+        clear(IDX_MATCH); emit('+')
+        goto(IDX_B); emit('[')
+        goto(IDX_MATCH); emit('-')
+        emit('-')
+        goto(IDX_TMP); emit('+')
+        goto(IDX_B); emit(']')
         
+        goto(IDX_MATCH); emit('[')
+        act()
+        goto(IDX_DONE); emit('+')
+        goto(IDX_MATCH); emit('-')
+        emit(']')
+        clear(IDX_A)
+        emit(']')
+
+    def act_plus(): goto(IDX_DATA); emit('+')
+    def act_minus(): goto(IDX_DATA); emit('-')
+    def act_dot(): goto(IDX_DATA); emit('.')
+
     def act_scan():
-        # Physical Scan Logic:
-        # Loop while ScanFlag is 1.
-        # Inside loop: Read char. If ']' or 0, Set ScanFlag=0.
-        
-        clear(IDX_SCAN_FLAG); emit('+')
-        
-        goto(IDX_SCAN_FLAG)
-        emit('[')
-        
-        # Read next char into IDX_CHAR
+        clear(IDX_SCAN); emit('+')
+        goto(IDX_SCAN); emit('[')
         goto(IDX_CHAR); emit(',')
-        
-        # Check if 0 (EOF)
-        # If 0, Stop (Clear ScanFlag)
-        copy_val(IDX_CHAR, IDX_EXTRA, IDX_EXTRA_2)
-        clear(IDX_IS_MATCH); emit('+')
-        goto(IDX_EXTRA); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA); emit('[-]'); emit(']')
-        
-        goto(IDX_IS_MATCH); emit('[')
-        clear(IDX_SCAN_FLAG) # EOF -> Stop
-        clear(IDX_IS_MATCH)
+        copy(IDX_CHAR, IDX_A, IDX_B)
+        clear(IDX_MATCH); emit('+')
+        goto(IDX_A); emit('[')
+        goto(IDX_MATCH); emit('-')
+        goto(IDX_A); emit('[-]')
         emit(']')
-        
-        # Check if 8 (])
-        # Only if ScanFlag is still 1
-        copy_val(IDX_SCAN_FLAG, IDX_EXTRA, IDX_EXTRA_2)
-        goto(IDX_EXTRA); emit('[')
-        
-        copy_val(IDX_CHAR, IDX_EXTRA_2, IDX_EXTRA)
-        goto(IDX_EXTRA_2); emit('-'*8)
-        
-        clear(IDX_IS_MATCH); emit('+')
-        goto(IDX_EXTRA_2); emit('['); goto(IDX_IS_MATCH); emit('-'); goto(IDX_EXTRA_2); emit('[-]'); emit(']')
-        
-        goto(IDX_IS_MATCH); emit('[')
-        clear(IDX_SCAN_FLAG) # ] -> Stop
-        clear(IDX_IS_MATCH)
+        goto(IDX_MATCH); emit('[')
+        clear(IDX_SCAN); clear(IDX_MATCH)
         emit(']')
-        
-        clear(IDX_EXTRA)
+        copy(IDX_CHAR, IDX_A, IDX_B)
+        goto(IDX_A); emit('-'*8)
+        clear(IDX_MATCH); emit('+')
+        goto(IDX_A); emit('[')
+        goto(IDX_MATCH); emit('-')
+        goto(IDX_A); emit('[-]')
         emit(']')
-        
-        goto(IDX_SCAN_FLAG); emit(']') # Loop
-        
-        # Done Scanning.
-        # The main loop expects us to read the *next* opcode.
-        # Note: we read into IDX_CHAR (separate from IDX_OP). The file pointer advanced,
-        # so the main loop's next ',' (into IDX_OP) will read the following byte.
-        # Therefore no extra consumption needed here.
+        goto(IDX_MATCH); emit('[')
+        clear(IDX_SCAN); clear(IDX_MATCH)
+        emit(']')
+        goto(IDX_SCAN); emit(']')
 
-    # --- Generate Checks 1..8 ---
-    check_opcode_and_act(lambda: None) # 1
-    check_opcode_and_act(lambda: None) # 2
-    check_opcode_and_act(act_plus)     # 3 (+)
-    check_opcode_and_act(act_minus)    # 4 (-)
-    check_opcode_and_act(act_dot)      # 5 (.)
-    check_opcode_and_act(lambda: None) # 6
-    check_opcode_and_act(act_scan)     # 7 ([) - Safe Scan
-    check_opcode_and_act(lambda: None) # 8 (])
-    
-    # End Main Loop
+    # Opcode dispatch
+    check(lambda: None)
+    check(lambda: None)
+    check(act_plus)
+    check(act_minus)
+    check(act_dot)
+    check(lambda: None)
+    check(act_scan)
+    check(lambda: None)
+
+    # --- Read next opcode ---
+    goto(IDX_OP); emit(',')
+
+    # --- Loop end ---
     goto(IDX_OP); emit(']')
 
-    # Output: map BF to Spaces tokens
+    # Spaces encoding
     S, F = " ", "\u3000"
-    mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
-    print("".join([mapping.get(c, '') for c in bf]), end='')
+    m = {'>':S*3,'<':S*2+F,'+':S+F+S,'-':S+F+F,'.':F+S+S,',':F+S+F,'[':F*2+S,']':F*3}
+    print("".join(m[c] for c in bf if c in m), end='')
 
 if __name__ == "__main__":
     main()
