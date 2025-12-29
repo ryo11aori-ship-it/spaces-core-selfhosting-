@@ -1,7 +1,5 @@
 import sys
 
-# Stage 3: Robust Interpreter with correct linear opcode consumption
-
 def main():
     bf = []
     cur = 0
@@ -38,7 +36,6 @@ def main():
         goto(src); emit(']')
         move(tmp, src)
 
-    # Memory layout
     IDX_OP = 0
     IDX_TMP = 1
     IDX_DONE = 2
@@ -49,15 +46,17 @@ def main():
     IDX_SCAN = 7
     IDX_CHAR = 8
     IDX_COPY_TMP = 9
+    IDX_IP_VALID = 10   # ★ NEW
 
-    # --- Header ---
+    # Header
     goto(IDX_OP); emit(',,,')
 
-    # --- Initial opcode read ---
+    # First opcode
     goto(IDX_OP); emit(',')
+    clear(IDX_IP_VALID); emit('+')  # IP_VALID = 1
 
-    # --- Main loop: while opcode != 0 ---
-    emit('[')
+    # Main loop: while IP_VALID != 0
+    goto(IDX_IP_VALID); emit('[')
 
     # Copy opcode
     copy(IDX_OP, IDX_TMP, IDX_COPY_TMP)
@@ -69,18 +68,15 @@ def main():
         goto(IDX_A); emit('-')
         goto(IDX_DONE); emit('[-]+')
         emit(']')
-
         goto(IDX_A); emit('[')
         move(IDX_TMP, IDX_B)
         goto(IDX_B); emit('-')
-
         clear(IDX_MATCH); emit('+')
         goto(IDX_B); emit('[')
         goto(IDX_MATCH); emit('-')
         emit('-')
         goto(IDX_TMP); emit('+')
         goto(IDX_B); emit(']')
-        
         goto(IDX_MATCH); emit('[')
         act()
         goto(IDX_DONE); emit('+')
@@ -92,33 +88,8 @@ def main():
     def act_plus(): goto(IDX_DATA); emit('+')
     def act_minus(): goto(IDX_DATA); emit('-')
     def act_dot(): goto(IDX_DATA); emit('.')
+    def act_scan(): clear(IDX_SCAN); emit('+')
 
-    def act_scan():
-        clear(IDX_SCAN); emit('+')
-        goto(IDX_SCAN); emit('[')
-        goto(IDX_CHAR); emit(',')
-        copy(IDX_CHAR, IDX_A, IDX_B)
-        clear(IDX_MATCH); emit('+')
-        goto(IDX_A); emit('[')
-        goto(IDX_MATCH); emit('-')
-        goto(IDX_A); emit('[-]')
-        emit(']')
-        goto(IDX_MATCH); emit('[')
-        clear(IDX_SCAN); clear(IDX_MATCH)
-        emit(']')
-        copy(IDX_CHAR, IDX_A, IDX_B)
-        goto(IDX_A); emit('-'*8)
-        clear(IDX_MATCH); emit('+')
-        goto(IDX_A); emit('[')
-        goto(IDX_MATCH); emit('-')
-        goto(IDX_A); emit('[-]')
-        emit(']')
-        goto(IDX_MATCH); emit('[')
-        clear(IDX_SCAN); clear(IDX_MATCH)
-        emit(']')
-        goto(IDX_SCAN); emit(']')
-
-    # Opcode dispatch
     check(lambda: None)
     check(lambda: None)
     check(act_plus)
@@ -128,13 +99,17 @@ def main():
     check(act_scan)
     check(lambda: None)
 
-    # --- Read next opcode ---
+    # Read next opcode
     goto(IDX_OP); emit(',')
 
-    # --- Loop end ---
+    # EOF check
+    goto(IDX_IP_VALID); emit('[-]')
+    goto(IDX_OP); emit('[')
+    goto(IDX_IP_VALID); emit('+')
     goto(IDX_OP); emit(']')
+    
+    goto(IDX_IP_VALID); emit(']')
 
-    # Spaces encoding
     S, F = " ", "\u3000"
     m = {'>':S*3,'<':S*2+F,'+':S+F+S,'-':S+F+F,'.':F+S+S,',':F+S+F,'[':F*2+S,']':F*3}
     print("".join(m[c] for c in bf if c in m), end='')
