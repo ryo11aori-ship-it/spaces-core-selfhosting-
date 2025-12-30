@@ -1,7 +1,7 @@
 import sys
 
 # Stage 5: Native Self-Hosted Compiler (Spaces UTF-8 Source -> Spaces Binary)
-# Fixed: Corrected pointer offsets in check_val to avoid clearing the bit buffer/count.
+# Fixed: IndentationError at line 82.
 
 def main():
     bf = []
@@ -26,8 +26,6 @@ def main():
     # Helper: Check if Cell 0 == val. Result in Cell 4.
     def check_val(val):
         # We need to clear Temp(3) and Flag(4).
-        # FIX: Previously '>[-]>[-]<<' cleared 1 and 2 (Buffer/Count) -> DATA LOSS
-        # NEW: '>>>[-]>[-]<<<<' clears 3 and 4.
         emit('>>>[-]>[-]<<<<') # Clear 3, 4. Ptr=0
         
         # Copy 0 -> 3 (Temp)
@@ -52,8 +50,10 @@ def main():
         emit('[>>>+<<<-]') # Move 1->4. Ptr=1
         emit('>>>') # Ptr=4
         emit('[<<<++>>>-]')   # Move 4->1 (Doubled). Ptr=4
+        
         if bit_val == 1:
-            emit('<<<+>>>')    # Add 1 to Buffer
+            emit('<<<+>>>')    # Add 1 to Buffer if bit is 1
+            
         emit('<<<') # Ptr=1
         
         # 2. Count++
@@ -77,21 +77,21 @@ def main():
         # 4. If Flag(4) is 1, Output Opcode
         emit('>') # Ptr=4
         emit('[') 
-            # Opcode = Buffer(1) + 1
-            # We can destructively move Buffer(1) -> Temp(3) since we reset after.
-            emit('<<<') # Ptr=1
-            emit('[>>+<<-]') # Move 1->3. Ptr=1
-            
-            # Output
-            emit('>>') # Ptr=3
-            emit('+.') # Add 1 and Output
-            emit('[-]') # Clear 3
-            
-            # Reset Count(2)
-            emit('<[-]') # Clear 2
-            
-            # Clear Flag(4) to exit loop
-            emit('>>[-]') # Ptr=4
+        # Opcode = Buffer(1) + 1
+        # We can destructively move Buffer(1) -> Temp(3) since we reset after.
+        emit('<<<') # Ptr=1
+        emit('[>>+<<-]') # Move 1->3. Ptr=1
+        
+        # Output
+        emit('>>') # Ptr=3
+        emit('+.') # Add 1 and Output
+        emit('[-]') # Clear 3
+        
+        # Reset Count(2)
+        emit('<[-]') # Clear 2
+        
+        # Clear Flag(4) to exit loop
+        emit('>>[-]') # Ptr=4
         emit(']')
         
         # Return to 0
@@ -118,7 +118,6 @@ def main():
     emit('<<<<') # Ptr=0
     
     # Consume 2 bytes (0x80, 0x80) from input
-    # Since we are inside the loop, we must read into Cell 0 and discard
     emit(',') # Read byte 2 -> Cell 0
     emit(',') # Read byte 3 -> Cell 0
     
