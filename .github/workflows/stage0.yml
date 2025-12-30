@@ -1,4 +1,4 @@
-name: Spaces CI (Stage 0-5)
+name: Spaces CI (Stage 0-6)
 
 on:
   push:
@@ -63,7 +63,7 @@ jobs:
   # === Stage 4: Self-Hosted Compiler (BF -> Bin) ===
   stage4:
     runs-on: ubuntu-latest
-    needs: stage2 # Linear interp is enough prerequisite
+    needs: stage2
     steps:
       - uses: actions/checkout@v4
       - run: mkdir -p bin spaces/self
@@ -126,3 +126,45 @@ jobs:
             spaces/self/native_compiler.spaces
             hello_native.bin
             output.txt
+
+  # === Stage 6: Bootstrap Verification (C vs Spaces) ===
+  # C製エンコーダと、Spaces製コンパイラの出力が「完全に一致」することを証明する。
+  # これが成功すれば、C製エンコーダ(Stage 1)を廃止できる。
+  verify-bootstrap:
+    runs-on: ubuntu-latest
+    needs: [stage1, stage5]
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p bin spaces/self
+      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
+
+      # 1. Generate Native Compiler
+      - run: python3 tools/gen_native_compiler.py > spaces/self/native_compiler.spaces
+
+      # 2. Prepare Input Source
+      - run: |
+          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
+          python3 tools/generator.py hello.bf > hello.spaces
+
+      # 3. Generate Binary A (using C Encoder)
+      - run: ./bin/encoder hello.spaces > binary_A.bin
+
+      # 4. Generate Binary B (using Spaces Compiler on VM)
+      - run: ./bin/ref_vm spaces/self/native_compiler.spaces < hello.spaces > binary_B.bin
+
+      # 5. Compare A and B
+      #    They must be IDENTICAL byte-for-byte.
+      - run: |
+          echo "Comparing binaries..."
+          md5sum binary_A.bin binary_B.bin
+          
+          if diff -q binary_A.bin binary_B.bin; then
+            echo "🎉 BOOTSTRAP VERIFIED: Spaces Compiler produces bit-perfect binary!"
+          else
+            echo "❌ Mismatch: The Spaces compiler is not yet a perfect replacement."
+            # Show hexdump diff for debug
+            hexdump -C binary_A.bin > dump_A.txt
+            hexdump -C binary_B.bin > dump_B.txt
+            diff dump_A.txt dump_B.txt || true
+            exit 1
+          fi
