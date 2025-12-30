@@ -73,8 +73,11 @@ def main():
         0x2E, 0x74, 0x65, 0x78, 0x74, 0x00, 0x00, 0x00,
         0x06, 0x00, 0x00, 0x00, # VirtualSize
         0x00, 0x10, 0x00, 0x00, # VirtualAddress (0x1000)
-        0x06, 0x00, 0x00, 0x00, # RawSize
-        0x00, 0x02, 0x00, 0x00, # RawPtr (512)
+        
+        # FIX: SizeOfRawData = 512 (must match FileAlignment)
+        0x00, 0x02, 0x00, 0x00, 
+        
+        0x00, 0x02, 0x00, 0x00, # PointerToRawData (512)
         0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00,
         0x00, 0x00,
@@ -83,7 +86,7 @@ def main():
     ]
     pe_bytes.extend(section_bytes)
 
-    # Padding to 512 bytes
+    # Padding Header to 512 bytes
     current_len = len(pe_bytes)
     pe_bytes.extend([0] * (512 - current_len))
 
@@ -91,6 +94,10 @@ def main():
     # mov eax, 42; ret
     code_bytes = [0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3]
     pe_bytes.extend(code_bytes)
+
+    # FIX: Padding Code Section to 512 bytes (Total File Size = 1024)
+    code_padding = 512 - len(code_bytes)
+    pe_bytes.extend([0] * code_padding)
 
     # Emit
     for b in pe_bytes:
@@ -101,7 +108,7 @@ def main():
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     full_bf = "".join(bf)
     
-    # FIX: Use binary stdout to write UTF-8 directly, avoiding Windows CP1252 issues
+    # Use binary stdout to write UTF-8 directly
     output_str = "".join([mapping.get(c, '') for c in full_bf])
     sys.stdout.buffer.write(output_str.encode('utf-8'))
 
