@@ -1,7 +1,7 @@
 import sys
 
 # Stage 5: Native Self-Hosted Compiler (Spaces UTF-8 Source -> Spaces Binary)
-# Fixed: IndentationError at line 82.
+# Fixed: check_val copy logic to properly duplicate Cell 0 to Cell 3 using Cell 4 as temp.
 
 def main():
     bf = []
@@ -17,7 +17,7 @@ def main():
     # Cell 1: Bit Buffer (accumulates bits)
     # Cell 2: Bit Count (0..3)
     # Cell 3: Temp / Copy
-    # Cell 4: Flag
+    # Cell 4: Flag / Copy-Temp
     
     # --- 2. Main Loop ---
     emit(',')
@@ -28,8 +28,15 @@ def main():
         # We need to clear Temp(3) and Flag(4).
         emit('>>>[-]>[-]<<<<') # Clear 3, 4. Ptr=0
         
-        # Copy 0 -> 3 (Temp)
-        emit('[>>>+<<<-]>>>[<<<+>>>-]<<<') # Copy 0->3, restore 0. Ptr=0
+        # FIX: Non-destructive copy from 0 to 3 using 4 as temp.
+        # 1. Move 0 -> 3 and 4
+        emit('[>>>+>+<<<<-]') # Cell 0 becomes 0. 3 and 4 get value. Ptr=0.
+        
+        # 2. Restore 0 from 4
+        emit('>>>>[<<<<+>>>>-]') # Move 4 -> 0. Ptr=4.
+        emit('<<<<') # Ptr=0.
+        
+        # Now Cell 0 has original value, Cell 3 has copy, Cell 4 is 0.
         
         # Subtract val from 3
         emit('>>>') # Ptr=3
