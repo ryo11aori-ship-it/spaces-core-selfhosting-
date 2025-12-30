@@ -128,7 +128,6 @@ jobs:
           diff -q binary_A.bin binary_B.bin
 
   # === Stage 7: ELF Native Generation (Linux) ===
-  # Spaces プログラムを実行し、Linux ELF バイナリを生成・実行する。
   stage7-elf:
     runs-on: ubuntu-latest
     needs: stage5
@@ -137,18 +136,13 @@ jobs:
       - run: mkdir -p bin spaces/self
       - run: gcc src/ref/vm.c -o bin/ref_vm
 
-      # 1. Generate ELF Writer Source (Spaces Code)
       - run: python3 tools/gen_elf_writer.py > spaces/self/elf_writer.spaces
       
-      # 2. Run ELF Writer on VM -> Output 'tiny.elf'
-      #    Input is dummy, Output is binary.
       - run: echo "" | ./bin/ref_vm spaces/self/elf_writer.spaces > tiny.elf
       
-      # 3. Execute Generated ELF
       - run: |
           chmod +x tiny.elf
           ./tiny.elf || EXIT_CODE=$?
-          
           echo "Exit Code: $EXIT_CODE"
           if [ "$EXIT_CODE" -eq 42 ]; then
             echo "🎉 SUCCESS: Generated valid Linux ELF executable!"
@@ -177,7 +171,6 @@ jobs:
       - run: python3 tools/gen_linear_compiler.py > spaces/self/linear_compiler.spaces
       
       # 2. Prepare "Unrolled" Hello World Source (ASCII BF)
-      #    FIX: Do NOT run generator.py. Pass raw BF because the compiler currently expects ASCII input.
       - run: |
           echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++.+++++++..+++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++.+++.-------------------------------------------------------------------.------------------------------------------------------------------------------------.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++." > linear_hello.bf
 
@@ -190,7 +183,6 @@ jobs:
       # 4. Verify Execution
       - run: |
           chmod +x linear.elf
-          # Check size (Should be > 140 bytes now)
           ls -l linear.elf
           
           ./linear.elf > output.txt
