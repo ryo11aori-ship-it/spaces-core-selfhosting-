@@ -1,10 +1,10 @@
 import sys
 
-# Stage 9: Linear Native Compiler Generator (Fixed Indentation)
+# Stage 9: Linear Native Compiler Generator (Fixed Logic)
 # Generates a Spaces program that:
 # 1. Emits ELF Header.
-# 2. Reads ASCII BF source from stdin (+ - > < . ,).
-# 3. Translates into x64 Machine Code using a robust "Copy & Check" strategy.
+# 2. Reads ASCII BF source from stdin.
+# 3. Translates into x64 Machine Code using a correct "Copy & Check" strategy.
 # 4. Emits Footer (Exit syscall).
 
 def main():
@@ -45,31 +45,35 @@ def main():
     emit(',[') 
     
     # Helper to emit bytes
+    # Assumes we are at C2 (Flag). Uses C3 as scratch.
     def emit_bytes(bs):
         for b in bs:
             emit('>' + '+'*b + '. [-] <')
 
-    # Strategy: C0 is Input. C1 is Copy.
     # Copy C0 -> C1 safely
+    # Start: C0. End: C1.
     emit('>[-]>[-]<< [>+>+<<-] >> [<<+>>-] <') 
     
-    # Check function (Flat implementation)
+    # Check function (Corrected Pointer Logic)
     def check(val, bytes_hex):
+        # We are at C1 (Value Copy).
         # Subtract val from C1
-        emit('>' + '-'*val)
+        emit('-'*val)
         
-        # Is C1 Zero?
-        emit('>[-]+<') # C2 = 1 (Flag)
-        emit('[>[-]<[-]]') # If C1!=0, C2=0. C1 Cleared.
+        # Is C1 Zero? Use C2 as Flag.
+        emit('>[-]+<') # Set C2=1. Return to C1.
+        emit('[>[-]<[-]]') # If C1!=0, Clear C2, Clear C1. End at C1.
         
+        # Move to Flag (C2)
+        emit('>') 
         # If C2 is 1 (Match), Emit.
-        emit('>>[') 
+        emit('[') 
         emit_bytes(bytes_hex)
-        emit('[-]]') # Clear C2
+        emit('[-]]') # Clear C2.
         
-        # Restore logic: Go back to C0
+        # We are at C2. Restore Logic expects to be at C0.
         emit('<<') 
-        # Recopy C0 to C1 for next check
+        # Recopy C0 to C1 for next check. End at C1.
         emit('>[-]>[-]<< [>+>+<<-] >> [<<+>>-] <')
 
     # Order check
@@ -90,8 +94,9 @@ def main():
     # < (60)
     check(60, [0x49, 0xff, 0xcd])
     
-    # Consume C0 to exit loop
-    emit('[-],]')
+    # Consume C0 (Input) to exit loop
+    # We are at C1. Go to C0.
+    emit('< [-],]')
 
     # --- Epilogue (Exit 0) ---
     exit_code = [0xb8, 0x3c, 0x00, 0x00, 0x00, 0x48, 0x31, 0xff, 0x0f, 0x05]
