@@ -2,15 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TAPE_SIZE 65536  /* 拡張: 30000 -> 64KB (アラインメント考慮) */
+/* 拡張: メモリサイズを 64KB に拡張し、安全マージンを確保 */
+#define TAPE_SIZE 65536
 #define MAX_FILE_SIZE 1048576 /* 1MB limit for sanity */
 
 unsigned char tape[TAPE_SIZE];
-int ptr = 0; /* ポインタを int index に変更（境界チェックのため） */
+int ptr = 0; /* ポインタを int に変更（負の値チェックのため） */
 
 /* op_map: index 0..7 => BF characters */
 int op_map[8] = {'>', '<', '+', '-', '.', ',', '[', ']'};
 
+/* エラー時に即座に停止してメッセージを出す関数 */
 void panic(const char *msg) {
     fprintf(stderr, "[VM Error] %s\n", msg);
     exit(1);
@@ -18,7 +20,9 @@ void panic(const char *msg) {
 
 /* UTF-8 full-width space (U+3000) detection with Bounds Checking */
 int is_full_space(unsigned char *s, int idx, int len) {
-    if (idx + 2 >= len) return 0; /* Safety Check */
+    /* インデックス境界チェックを追加 */
+    if (idx + 2 >= len) return 0;
+    
     if (s[idx] == 0xE3 && s[idx+1] == 0x80 && s[idx+2] == 0x80) {
         return 1;
     }
@@ -70,10 +74,12 @@ void run_bf(char *code) {
         switch (*pc) {
             case '>': 
                 ptr++; 
+                /* 境界チェック: 右端オーバーフロー */
                 if (ptr >= TAPE_SIZE) panic("Tape pointer overflow (Right)");
                 break;
             case '<': 
                 ptr--; 
+                /* 境界チェック: 左端アンダーフロー */
                 if (ptr < 0) panic("Tape pointer underflow (Left)");
                 break;
             case '+': 
@@ -129,6 +135,7 @@ int main(int argc, char **argv) {
         long s = ftell(f); 
         fseek(f, 0, SEEK_SET);
         
+        /* ファイルサイズ制限のチェック */
         if (s < 0 || s > MAX_FILE_SIZE) { 
             fclose(f); 
             fprintf(stderr, "File too large or invalid\n"); 
