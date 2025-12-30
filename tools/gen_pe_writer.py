@@ -1,7 +1,9 @@
 import sys
 
-# Stage 7 (Windows): PE Binary Generator (Proof of Concept)
+# Stage 8: Windows PE Binary Generator (Cross-Compiler)
 # Generates a Spaces program that outputs a minimal x86_64 PE (.exe) binary.
+# Target: Windows x64
+# Exit status: 42 (via ret)
 
 def main():
     bf = []
@@ -14,8 +16,8 @@ def main():
             bf.append('.')
             bf.append('[-]')
 
-    # Minimal PE32+ (64-bit) Header returning 42
-    # Structure aligned to 512 bytes
+    # Minimal PE32+ (64-bit) Header
+    # Structure aligned to 512 bytes, File size 1024 bytes
     
     pe_bytes = [
         # --- MS-DOS Header ---
@@ -74,7 +76,7 @@ def main():
         0x06, 0x00, 0x00, 0x00, # VirtualSize
         0x00, 0x10, 0x00, 0x00, # VirtualAddress (0x1000)
         
-        # FIX: SizeOfRawData = 512 (must match FileAlignment)
+        # SizeOfRawData = 512
         0x00, 0x02, 0x00, 0x00, 
         
         0x00, 0x02, 0x00, 0x00, # PointerToRawData (512)
@@ -95,7 +97,7 @@ def main():
     code_bytes = [0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3]
     pe_bytes.extend(code_bytes)
 
-    # FIX: Padding Code Section to 512 bytes (Total File Size = 1024)
+    # Padding Code Section to 512 bytes (Total File Size = 1024)
     code_padding = 512 - len(code_bytes)
     pe_bytes.extend([0] * code_padding)
 
@@ -103,12 +105,11 @@ def main():
     for b in pe_bytes:
         emit_byte(b)
 
-    # Convert to Spaces
+    # Convert to Spaces (Secure Output)
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     full_bf = "".join(bf)
     
-    # Use binary stdout to write UTF-8 directly
     output_str = "".join([mapping.get(c, '') for c in full_bf])
     sys.stdout.buffer.write(output_str.encode('utf-8'))
 
