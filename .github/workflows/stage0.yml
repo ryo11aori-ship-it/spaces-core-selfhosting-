@@ -1,4 +1,4 @@
-name: Stage 9 Debug CI
+name: Spaces Compiler CI
 
 on:
   push:
@@ -6,74 +6,42 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ジョブを分けずに一気通貫で実行することで、ログ消失を防ぐ
-  build-and-test:
+  stage9-compiler:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 1. デバッグ: ファイルが本当に存在するか確認
-      - name: Debug File Existence
-        run: |
-          echo "=== Current Directory Content ==="
-          ls -R
-          
-          echo "=== Checking Critical Files ==="
-          if [ ! -f src/ref/vm.c ]; then
-            echo "❌ ERROR: src/ref/vm.c is missing!"
-            exit 1
-          fi
-          if [ ! -f tools/gen_linear_compiler.py ]; then
-            echo "❌ ERROR: tools/gen_linear_compiler.py is missing!"
-            echo "Did you commit the python script?"
-            exit 1
-          fi
-          echo "✅ Critical files found."
-
-      # 2. VMのビルド (C言語)
-      - name: Build Reference VM
+      - name: Build VM
         run: |
           mkdir -p bin
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
-          echo "✅ VM Built successfully."
 
-      # 3. コンパイラの生成 (Spaces言語)
-      - name: Generate Linear Compiler
+      - name: Generate Compiler Source
         run: |
           mkdir -p spaces/self
           python3 tools/gen_linear_compiler.py > spaces/self/linear_compiler.spaces
-          echo "✅ Compiler Source Generated."
 
-      # 4. テスト用ソースコードの準備 (ASCII Brainfuck)
       - name: Prepare Hello World Source
         run: |
           echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++.+++++++..+++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++.+++.-------------------------------------------------------------------.------------------------------------------------------------------------------------.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++." > linear_hello.bf
 
-      # 5. コンパイル実行 (Spaces VM上で Spaces コンパイラを動かす)
-      - name: Run Compilation (Stage 9)
+      - name: Run Compilation and Verify
         run: |
-          echo "Running Compiler..."
-          # 入力: BFソース -> 処理: Spacesコンパイラ -> 出力: ELFバイナリ
+          echo "Starting Compilation..."
           ./bin/ref_vm spaces/self/linear_compiler.spaces < linear_hello.bf > linear.elf
           
+          echo "Checking Output Binary..."
           ls -l linear.elf
-          echo "✅ Compilation finished."
-
-      # 6. 生成されたELFの動作確認
-      - name: Verify Execution
-        run: |
           chmod +x linear.elf
-          ./linear.elf > output.txt
           
-          echo "--- Program Output ---"
+          echo "Running Generated Binary..."
+          ./linear.elf > output.txt
           cat output.txt
-          echo "----------------------"
           
           if grep -q "Hello World!" output.txt; then
-            echo "🎉 SUCCESS: The Spaces Compiler works!"
+            echo "SUCCESS: The compiler works!"
           else
-            echo "❌ FAILED: Output mismatch."
+            echo "FAILED: Output mismatch"
             exit 1
           fi
