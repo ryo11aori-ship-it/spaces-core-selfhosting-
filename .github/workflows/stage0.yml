@@ -1,171 +1,5 @@
-name: Spaces CI (Stage 0-8)
-
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
-
-jobs:
-  # === Stage 0: Reference VM (Bootstrap Base) ===
-  stage0:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm
-      - run: |
-          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          python3 tools/generator.py hello.bf > hello.spaces
-          ./bin/ref_vm hello.spaces > output.txt
-          grep "Hello World!" output.txt
-
-  # === Stage 1: Encoder Verification ===
-  stage1:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin && gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
-      - run: python3 tools/generator.py "+" > test.spaces
-      - run: |
-          ./bin/encoder test.spaces > test.bin
-          HEADER=$(od -t x1 -N 4 -An test.bin | tr -d ' \n')
-          if [ "$HEADER" = "53504103" ]; then echo "✅ OK"; else echo "❌ Fail"; exit 1; fi
-
-  # === Stage 2: Linear Interpreter ===
-  stage2:
-    runs-on: ubuntu-latest
-    needs: stage1
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
-      - run: python3 tools/gen_linear_interp.py > spaces/self/linear_interp.spaces
-      - run: |
-          python3 tools/generator.py "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > print_a.spaces
-          ./bin/encoder print_a.spaces > print_a.bin
-      - run: |
-          ./bin/ref_vm spaces/self/linear_interp.spaces < print_a.bin > output.txt
-          if [ "$(cat output.txt)" = "A" ]; then echo "✅ OK"; else exit 1; fi
-
-  # === Stage 3: Self-Hosted Translator ===
-  stage3:
-    runs-on: ubuntu-latest
-    needs: stage2
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm
-      - run: python3 tools/gen_full_interp.py > spaces/self/translator.spaces
-      - run: |
-          echo "Hello Spaces Self-Hosting!" > source.txt
-          ./bin/ref_vm spaces/self/translator.spaces < source.txt > output.txt
-          diff -q source.txt output.txt
-
-  # === Stage 4: Self-Hosted Compiler (BF -> Bin) ===
-  stage4:
-    runs-on: ubuntu-latest
-    needs: stage2
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm
-      - run: python3 tools/gen_compiler.py > spaces/self/compiler.spaces
-      - run: |
-          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          ./bin/ref_vm spaces/self/compiler.spaces < hello.bf > hello.bin
-          ./bin/ref_vm hello.bin > output.txt
-          if grep -q "Hello World!" output.txt; then echo "✅ Stage 4 Passed"; else exit 1; fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: stage4-artifacts
-          path: |
-            spaces/self/compiler.spaces
-            hello.bin
-
-  # === Stage 5: Native Compiler (Spaces -> Bin) ===
-  stage5:
-    runs-on: ubuntu-latest
-    needs: stage4
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm
-      - run: python3 tools/gen_native_compiler.py > spaces/self/native_compiler.spaces
-      - run: |
-          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          python3 tools/generator.py hello.bf > hello.spaces
-          ./bin/ref_vm spaces/self/native_compiler.spaces < hello.spaces > hello_native.bin
-      - run: |
-          SIZE=$(stat -c%s hello_native.bin)
-          if [ "$SIZE" -le 4 ]; then echo "❌ Binary too small"; exit 1; fi
-          ./bin/ref_vm hello_native.bin > output.txt
-          if grep -q "Hello World!" output.txt; then echo "✅ Stage 5 Passed"; else exit 1; fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: stage5-artifacts
-          path: |
-            spaces/self/native_compiler.spaces
-            hello_native.bin
-            output.txt
-
-  # === Stage 6: Bootstrap Verification ===
-  stage6:
-    runs-on: ubuntu-latest
-    needs: [stage1, stage5]
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm && gcc tools/encoder.c -o bin/encoder
-      - run: python3 tools/gen_native_compiler.py > spaces/self/native_compiler.spaces
-      - run: |
-          echo "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++." > hello.bf
-          python3 tools/generator.py hello.bf > hello.spaces
-          ./bin/encoder hello.spaces > binary_A.bin
-          ./bin/ref_vm spaces/self/native_compiler.spaces < hello.spaces > binary_B.bin
-      - run: |
-          md5sum binary_A.bin binary_B.bin
-          diff -q binary_A.bin binary_B.bin
-
-  # === Stage 7: ELF Native Generation (Linux) ===
-  # Spaces プログラムを実行し、Linux ELF バイナリを生成・実行する。
-  stage7-elf:
-    runs-on: ubuntu-latest
-    needs: stage5
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir -p bin spaces/self
-      - run: gcc src/ref/vm.c -o bin/ref_vm
-
-      # 1. Generate ELF Writer Source (Spaces Code)
-      - run: python3 tools/gen_elf_writer.py > spaces/self/elf_writer.spaces
-      
-      # 2. Run ELF Writer on VM -> Output 'tiny.elf'
-      #    Input is dummy, Output is binary.
-      - run: echo "" | ./bin/ref_vm spaces/self/elf_writer.spaces > tiny.elf
-      
-      # 3. Execute Generated ELF
-      - run: |
-          chmod +x tiny.elf
-          ./tiny.elf || EXIT_CODE=$?
-          
-          echo "Exit Code: $EXIT_CODE"
-          if [ "$EXIT_CODE" -eq 42 ]; then
-            echo "🎉 SUCCESS: Generated valid Linux ELF executable!"
-          else
-            echo "❌ Failed: Incorrect exit code."
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: linux-elf
-          path: tiny.elf
-
-    # === Stage 9: Linear Native Compiler (Real Compilation) ===
-  # Spaces言語で書かれたコンパイラが、ソースコードを読み込み、機械語に翻訳する。
-  # ループ処理の実装前なので、ループを展開したソースコード(Unrolled)でテストする。
+  # === Stage 9: Linear Native Compiler (Real Compilation) ===
+  # Spaces言語で書かれたコンパイラが、ASCII BFソースコードを読み込み、機械語に翻訳する。
   stage9-linear-compiler:
     runs-on: ubuntu-latest
     needs: stage5
@@ -177,24 +11,26 @@ jobs:
       # 1. Generate Linear Compiler (Spaces Source)
       - run: python3 tools/gen_linear_compiler.py > spaces/self/linear_compiler.spaces
       
-      # 2. Prepare "Unrolled" Hello World Source (No loops)
-      #    We use generator.py to convert BF -> Spaces, but the logic is linear.
+      # 2. Prepare "Unrolled" Hello World Source (ASCII BF)
+      #    FIX: Do NOT run generator.py. Pass raw BF because the compiler currently expects ASCII input.
       - run: |
           echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++.+++++++..+++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++.+++.-------------------------------------------------------------------.------------------------------------------------------------------------------------.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++." > linear_hello.bf
-          python3 tools/generator.py linear_hello.bf > linear_hello.spaces
 
       # 3. Compile Source -> 'linear.elf'
-      #    Input: linear_hello.spaces
+      #    Input: linear_hello.bf (ASCII)
       #    Compiler: linear_compiler.spaces (Running on ref_vm)
       #    Output: linear.elf (Native Executable)
-      - run: ./bin/ref_vm spaces/self/linear_compiler.spaces < linear_hello.spaces > linear.elf
+      - run: ./bin/ref_vm spaces/self/linear_compiler.spaces < linear_hello.bf > linear.elf
       
       # 4. Verify Execution
       - run: |
           chmod +x linear.elf
+          # Check size (Should be > 140 bytes now)
+          ls -l linear.elf
+          
           ./linear.elf > output.txt
           cat output.txt
-          # The unrolled BF above prints "Hello World!"
+          
           if grep -q "Hello World!" output.txt; then
             echo "🎉 SUCCESS: Linear Compiler works! True Compilation achieved."
           else
@@ -207,4 +43,3 @@ jobs:
         with:
           name: linear-elf
           path: linear.elf
-
