@@ -163,9 +163,10 @@ jobs:
           name: linux-elf
           path: tiny.elf
 
-  # === Stage 8: Native ELF Compiler (Hello World) ===
-  # Spacesコンパイラが、Hello Worldを実行するLinuxバイナリを生成する。
-  stage8-compiler:
+    # === Stage 9: Linear Native Compiler (Real Compilation) ===
+  # Spaces言語で書かれたコンパイラが、ソースコードを読み込み、機械語に翻訳する。
+  # ループ処理の実装前なので、ループを展開したソースコード(Unrolled)でテストする。
+  stage9-linear-compiler:
     runs-on: ubuntu-latest
     needs: stage5
     steps:
@@ -173,28 +174,37 @@ jobs:
       - run: mkdir -p bin spaces/self
       - run: gcc src/ref/vm.c -o bin/ref_vm
 
-      # 1. Generate the ELF Compiler (Spaces Source)
-      - run: python3 tools/gen_elf_compiler.py > spaces/self/elf_compiler.spaces
+      # 1. Generate Linear Compiler (Spaces Source)
+      - run: python3 tools/gen_linear_compiler.py > spaces/self/linear_compiler.spaces
       
-      # 2. Compile 'Hello World' Source -> 'hello.elf'
-      #    (The compiler currently ignores input and emits a fixed binary, verifying ELF generation capability)
-      - run: echo "dummy" | ./bin/ref_vm spaces/self/elf_compiler.spaces > hello.elf
-      
-      # 3. Execute Generated ELF
+      # 2. Prepare "Unrolled" Hello World Source (No loops)
+      #    We use generator.py to convert BF -> Spaces, but the logic is linear.
       - run: |
-          chmod +x hello.elf
-          ./hello.elf > output.txt
-          
+          echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++.+++++++..+++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++.+++.-------------------------------------------------------------------.------------------------------------------------------------------------------------.+++++++++++++++++++++++++++++++++++++++++++++++++++++++.++++++++++++++++++++++++." > linear_hello.bf
+          python3 tools/generator.py linear_hello.bf > linear_hello.spaces
+
+      # 3. Compile Source -> 'linear.elf'
+      #    Input: linear_hello.spaces
+      #    Compiler: linear_compiler.spaces (Running on ref_vm)
+      #    Output: linear.elf (Native Executable)
+      - run: ./bin/ref_vm spaces/self/linear_compiler.spaces < linear_hello.spaces > linear.elf
+      
+      # 4. Verify Execution
+      - run: |
+          chmod +x linear.elf
+          ./linear.elf > output.txt
           cat output.txt
+          # The unrolled BF above prints "Hello World!"
           if grep -q "Hello World!" output.txt; then
-            echo "🎉 SUCCESS: Generated valid Hello World ELF!"
+            echo "🎉 SUCCESS: Linear Compiler works! True Compilation achieved."
           else
-            echo "❌ Failed: Binary did not produce expected output."
+            echo "❌ Failed: Compiled binary did not work."
             exit 1
           fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: hello-elf
-          path: hello.elf
+          name: linear-elf
+          path: linear.elf
+
