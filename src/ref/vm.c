@@ -2,34 +2,35 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 拡張: メモリサイズを 64KB に拡張し、安全マージンを確保 */
+/* Windows環境でのみ必要なヘッダと設定 */
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
+/* メモリサイズを 64KB に拡張 */
 #define TAPE_SIZE 65536
-#define MAX_FILE_SIZE 1048576 /* 1MB limit for sanity */
+#define MAX_FILE_SIZE 1048576 /* 1MB limit */
 
 unsigned char tape[TAPE_SIZE];
-int ptr = 0; /* ポインタを int に変更（負の値チェックのため） */
+int ptr = 0;
 
-/* op_map: index 0..7 => BF characters */
 int op_map[8] = {'>', '<', '+', '-', '.', ',', '[', ']'};
 
-/* エラー時に即座に停止してメッセージを出す関数 */
 void panic(const char *msg) {
     fprintf(stderr, "[VM Error] %s\n", msg);
     exit(1);
 }
 
-/* UTF-8 full-width space (U+3000) detection with Bounds Checking */
+/* UTF-8 full-width space detection with Bounds Checking */
 int is_full_space(unsigned char *s, int idx, int len) {
-    /* インデックス境界チェックを追加 */
     if (idx + 2 >= len) return 0;
-    
     if (s[idx] == 0xE3 && s[idx+1] == 0x80 && s[idx+2] == 0x80) {
         return 1;
     }
     return 0;
 }
 
-/* Parse textual Spaces source into BF ASCII bytes. */
 int parse_line(char *input, int input_len, char *output, int max_out) {
     int out_idx = 0;
     int bit_buf = 0;
@@ -44,7 +45,7 @@ int parse_line(char *input, int input_len, char *output, int max_out) {
         } else if (uc == 0xE3) {
             if (is_full_space((unsigned char*)input, i, input_len)) {
                 bit = 1;
-                i += 2; /* Skip next 2 bytes safely */
+                i += 2;
             }
         }
 
@@ -52,7 +53,7 @@ int parse_line(char *input, int input_len, char *output, int max_out) {
             bit_buf = (bit_buf << 1) | bit;
             bit_cnt++;
             if (bit_cnt == 3) {
-                if (out_idx >= max_out - 1) panic("Output buffer overflow during parsing");
+                if (out_idx >= max_out - 1) panic("Output buffer overflow");
                 output[out_idx++] = (char)op_map[bit_buf & 0x7];
                 bit_buf = 0;
                 bit_cnt = 0;
@@ -63,10 +64,8 @@ int parse_line(char *input, int input_len, char *output, int max_out) {
     return out_idx;
 }
 
-/* Execute BF code safely */
 void run_bf(char *code) {
     char *pc = code;
-    /* Reset tape and ptr */
     memset(tape, 0, sizeof(tape));
     ptr = 0;
 
@@ -74,12 +73,10 @@ void run_bf(char *code) {
         switch (*pc) {
             case '>': 
                 ptr++; 
-                /* 境界チェック: 右端オーバーフロー */
                 if (ptr >= TAPE_SIZE) panic("Tape pointer overflow (Right)");
                 break;
             case '<': 
                 ptr--; 
-                /* 境界チェック: 左端アンダーフロー */
                 if (ptr < 0) panic("Tape pointer underflow (Left)");
                 break;
             case '+': 
@@ -90,7 +87,6 @@ void run_bf(char *code) {
                 break;
             case '.': 
                 putchar(tape[ptr]); 
-                fflush(stdout); 
                 break;
             case ',': {
                 int c = getchar();
@@ -102,7 +98,7 @@ void run_bf(char *code) {
                     int loop = 1;
                     while (loop > 0) {
                         pc++;
-                        if (!*pc) panic("Unmatched '[' (missing ']')");
+                        if (!*pc) panic("Unmatched '['");
                         if (*pc == '[') loop++;
                         if (*pc == ']') loop--;
                     }
@@ -112,21 +108,25 @@ void run_bf(char *code) {
                 if (tape[ptr]) {
                     int loop = 1;
                     while (loop > 0) {
-                        if (pc == code) panic("Unmatched ']' (missing '[')");
+                        if (pc == code) panic("Unmatched ']'");
                         pc--;
                         if (*pc == '[') loop--;
                         if (*pc == ']') loop++;
                     }
                 }
                 break;
-            default:
-                break;
+            default: break;
         }
         pc++;
     }
 }
 
 int main(int argc, char **argv) {
+    /* Windows環境でのみ標準出力をバイナリモードに強制変更 */
+    #ifdef _WIN32
+    _setmode(_fileno(stdout), _O_BINARY);
+    #endif
+
     if (argc > 1) {
         FILE *f = fopen(argv[1], "rb");
         if (!f) { perror("File open error"); return 1; }
@@ -135,40 +135,32 @@ int main(int argc, char **argv) {
         long s = ftell(f); 
         fseek(f, 0, SEEK_SET);
         
-        /* ファイルサイズ制限のチェック */
         if (s < 0 || s > MAX_FILE_SIZE) { 
-            fclose(f); 
-            fprintf(stderr, "File too large or invalid\n"); 
-            return 1; 
+            fclose(f); fprintf(stderr, "File too large\n"); return 1; 
         }
 
         unsigned char *in = malloc(s + 1);
-        if (!in) panic("Alloc fail (input)");
+        if (!in) panic("Alloc fail");
         
         size_t n = fread(in, 1, s, f);
         fclose(f);
         in[n] = 0;
 
-        char *bc = malloc(s + 128); /* Buffer for decoded BF */
-        if (!bc) panic("Alloc fail (bytecode)");
+        char *bc = malloc(s + 128);
+        if (!bc) panic("Alloc fail");
 
-        /* Detect binary format: SPA */
+        /* Header check: SPA */
         if (n >= 3 && in[0] == 'S' && in[1] == 'P' && in[2] == 'A') {
             size_t out_idx = 0;
-            /* Start from index 3 (skip SPA) */
             for (long i = 3; i < n; i++) {
                 unsigned char op = in[i];
                 char mapped = 0;
-                /* Validate Opcode Range 1-8 */
-                if (op >= 1 && op <= 8) {
-                    mapped = op_map[op - 1]; /* 1-based to 0-based index */
-                }
+                if (op >= 1 && op <= 8) mapped = op_map[op - 1];
                 if (mapped) bc[out_idx++] = mapped;
             }
             bc[out_idx] = 0;
             run_bf(bc);
         } else {
-            /* Textual Spaces */
             parse_line((char*)in, n, bc, s + 128);
             run_bf(bc);
         }
@@ -178,7 +170,6 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* Interactive Mode */
     fprintf(stderr, "Spaces REPL (Safe Mode)\n");
     char line[4096];
     char bc[4096];
