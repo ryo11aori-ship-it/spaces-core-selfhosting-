@@ -1,10 +1,10 @@
 import sys
 
-# Stage 9: Linear Native Compiler Generator (Alignment Fix)
+# Stage 9: Linear Native Compiler Generator (64KB Fixed Size)
 # Generates a Spaces program that:
-# 1. Emits ELF Header with SAFE Alignment (4KB).
+# 1. Emits ELF Header claiming a flat 64KB segment.
 # 2. Translates Source to Machine Code.
-# 3. PADS the output to ensure it covers the declared FileSize.
+# 3. PADS the output with ~64KB of zeros to guarantee file size > header claim.
 
 def main():
     bf = []
@@ -24,11 +24,11 @@ def main():
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # FIX 1: Set FileSize to 0x1000 (4KB). Small and safe.
-        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # MemSize (8MB)
-        0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # FIX 2: Set Alignment to 0x1000 (4KB). Previous 0x200000 (2MB) was too aggressive.
+        # FIX 1: Set FileSize to 0x10000 (64KB).
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 
+        # FIX 2: Set MemSize to 0x10000 (64KB). Flat binary style.
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 
+        # Alignment 4KB (0x1000)
         0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
     ]
     
@@ -37,8 +37,9 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # Runtime Init: mov r13, 0x600000
-    init_code = [0x49, 0xbd, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00]
+    # Runtime Init: mov r13, 0x408000 (Point Tape to middle of loaded memory, safe area)
+    # 49 bd 00 80 40 00 00 00 00 00
+    init_code = [0x49, 0xbd, 0x00, 0x80, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00]
     for b in init_code:
         if b: emit('+'*b + '. [-]')
         else: emit('.')
@@ -53,7 +54,7 @@ def main():
     # Copy C0 -> C1 safely
     emit('>[-]>[-]<< [>+>+<<-] >> [<<+>>-] <') 
     
-    # Check function (Correct Logic)
+    # Check function
     def check(val, bytes_hex):
         emit('-'*val) # Sub val from C1
         emit('>[-]+<') # Set C2=1
@@ -86,19 +87,27 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # --- PADDING FIX ---
-    # We claimed FileSize is 0x1000 (4096 bytes).
-    # We emit 4096 zeros to ensure the file is at least that big.
-    # Code is usually ~2800 bytes. 2800 + 4096 > 4096. Safe.
+    # --- PADDING FIX (64KB) ---
+    # We claimed 64KB. We assume output is < 64KB.
+    # We emit 256*256 = 65536 zeros to ensure file > 64KB.
+    # This guarantees the OS loader finds enough bytes.
     
     emit('>>') # To C2
-    emit('[-]' + '+'*16) # C2 = 16
-    emit('[')
+    emit('[-]') # Ensure C2=0 (Counter 1)
+    emit('-') # C2 = 255
+    emit('[') # Outer loop
+    
     emit('>') # To C3
-    emit('.' * 256) # Print 256 zeros
-    emit('<') # To C2
-    emit('-]') # Dec C2
-    # 16 * 256 = 4096 bytes padding.
+    emit('[-]') # Ensure C3=0 (Counter 2)
+    emit('-') # C3 = 255
+    emit('[') # Inner loop
+    emit('>') # To C4
+    emit('.') # Print 0
+    emit('<') # Back to C3
+    emit('-]') # Inner loop end
+    
+    emit('<') # Back to C2
+    emit('-]') # Outer loop end
 
     # Output
     S, F = " ", "\u3000"
