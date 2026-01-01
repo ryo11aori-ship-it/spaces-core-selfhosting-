@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Pointer & EOF Fix)
+# Stage 12: Spaces Native Compiler (Pointer Logic Strictly Fixed)
 # Reads Spaces Source Code.
-# Fixes Pointer Misalignment (C2->C4) and EOF Loop.
+# Fixes pointer drift in read_valid_bit.
 
 def main():
     bf = []
@@ -35,58 +35,95 @@ def main():
 
     # --- Helper: Read ONE Valid Bit ---
     def read_valid_bit(weight):
-        emit('[-]+[') # Start Search Loop
-        emit(',')     # Read C0
+        emit('[-]+[') # Start Search Loop (C0=1 to enter)
+        emit(',')     # Read Input to C0
         
-        # Check EOF (0)
-        emit('[') 
+        # --- Check EOF (0) ---
+        emit('[') # If C0!=0
         
-        # Check EOF (255)
-        emit('>[-]+< + [ - >-<') 
+        # --- Check EOF (255) ---
+        # Logic: C1 = (C0 != 255)
+        emit('>[-]+<') # C1=1
+        emit('+') # C0 += 1
+        emit('[') # If C0!=0 (Original was not 255)
+        emit('-') # Restore C0
+        emit('>-<') # C1=0
         
-        # Check F (227)
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>>' + '-'*227) 
-        emit('>[-]+< [>[-]<[-]]') 
-        
-        emit('>>> [') # If F (At C3)
-        emit('<<< ,,') # Consume 80 80 at C0
-        # FIX: C3 -> C4 is 1 step (>>> is C3).
-        # We are at C3. C4 is >.
-        emit('>' + '+'*weight + '<') # Add Weight to C4
-        emit('[-] <<< [-] >>>') # Clear C3, C0 -> Exit
-        emit(']') 
-        
-        # Check S (32)
-        emit('<<<') 
-        emit('[') 
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>>' + '-'*32) 
-        emit('>[-]+< [>[-]<[-]]') 
-        
-        emit('>>> [') # If S (At C3)
-        emit('[-] <<< [-] >>>') # Clear C3, C0 -> Exit
-        emit(']')
-        emit('<<<') 
-        emit(']') # End Not F
-        
-        emit('>>') 
-        emit(']') # End Not 255
-        
-        # Handle EOF 255 (C1=1)
-        emit('>') # To C1
-        emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5, C1, C0
+        # --- Check F (227) ---
+        # We are at C1 (which is 0). Go to C0.
         emit('<') 
         
+        # Copy C0 to C2 and C3. Restore C0 from C3.
+        # Temp Layout: C0(Input), C1(0), C2(Copy), C3(Copy)
+        emit('>> [-] > [-] <<<') # Clear C2, C3. Back to C0.
+        emit('[ >>+>+<<<- ]') # Move C0 -> C2, C3
+        emit('>>> [-<<<+>>>] <') # Move C3 -> C0. We are at C2.
+        
+        # Compare C2 with 227
+        emit('-'*227)
+        # Result C2 is 0 if Match.
+        
+        # Set C3=1 if Match (C2==0)
+        emit('>[-]+') # C3=1
+        emit('< [ >[-] < [-] ]') # If C2!=0, Clear C3, Clear C2.
+        
+        # If Match (C3=1)
+        emit('>') # To C3
+        emit('[')
+        # Consume 80 80 at C0 (We are at C3)
+        emit('<<< ,,') 
+        # Add Weight to C4
+        emit('>>>>' + '+'*weight + '<<<<') 
+        # Clear C3 (Self), Clear C0 to Exit Loop
+        emit('[-] <<< [-] >>>')
+        emit(']')
+        emit('<<<') # Back to C0
+        
+        # --- Check S (32) ---
+        emit('[') # If C0!=0 (Not F)
+        
+        # Copy C0 to C2, C3. Restore C0 from C3.
+        emit('>> [-] > [-] <<<') 
+        emit('[ >>+>+<<<- ]') 
+        emit('>>> [-<<<+>>>] <') # We are at C2.
+        
+        # Compare C2 with 32
+        emit('-'*32)
+        
+        # Set C3=1 if Match (C2==0)
+        emit('>[-]+ < [ >[-] < [-] ]')
+        
+        emit('>') # To C3
+        emit('[')
+        # Weight 0
+        # Clear C3, Clear C0 to Exit Loop
+        emit('[-] <<< [-] >>>')
+        emit(']')
+        emit('<<<') # Back to C0
+        
+        emit(']') # End Not F
+        
+        # Back to C1 check
+        emit('>') # To C1
+        emit(']') # End Not 255
+        
+        # If C1=1 (Was 255), Clear Everything to Exit
+        # We are at C1.
+        emit('[ >>>>[-]<<<< [-]<[-] ]') 
+        emit('<') # To C0
+        
         emit(']') # End Not 0
+        
+        # If C0 was cleared (Found S/F or EOF), Loop Ends.
         emit(']') # End Search Loop
 
     # --- MAIN LOOP ---
+    # Layout: C0=Input, C1-C3=Scratch, C4=Acc, C5=Flag
     emit('>>>>>') # To C5
     emit('[-]+')  # C5 = 1
     emit('[')     # Main Loop
     
-    emit('< [-]') # Clear C4 (Accumulator)
+    emit('< [-]') # Clear C4
     emit('<<<<')  # To C0
     
     # Read 3 Bits
