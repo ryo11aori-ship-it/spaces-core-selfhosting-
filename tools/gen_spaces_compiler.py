@@ -1,17 +1,21 @@
-# tools/gen_spaces_compiler.py — 修正版（CI 用）
+# tools/gen_spaces_compiler.py — 安全マージン付き修正版
 import sys
 
 def main():
     bf = []
 
-    # BF 命令文字のみを受け取るフィルタ付き emit
+    # BF 命令文字のみを受け付けるフィルタ付き emit
     BF_CHARS = set("><+-.,[]")
     def emit(s: str):
         cleaned = "".join(ch for ch in s if ch in BF_CHARS)
         if cleaned:
             bf.append(cleaned)
 
-    # --- ELF Header ---
+    # --- SAFETY: 初期に十分右へ移動しておく（テープの左端アンダーフロー防止） ---
+    # 300 は実用的かつ十分な余裕（必要に応じ増やしてください）
+    emit('>' * 300)
+
+    # --- ELF Header (bytes) ---
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -48,7 +52,7 @@ def main():
         # Check EOF 0
         emit('[')
         # Check EOF 255
-        emit('>[-]+<[- >-<]'.replace(' ', ''))  # keep exact BF tokens
+        emit('>[-]+<[- >-<]'.replace(' ', ''))  # スペースは除去
         # If 255 (C1=1), Exit All
         emit('>')
         emit('[>>>>>[-]<<<<<[-]<[-]]')
@@ -170,10 +174,16 @@ def main():
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
 
+    # Spaces mapping
     S, F = " ", "\u3000"
-    mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
+    mapping = {
+        '>': S * 3, '<': S * 2 + F, '+': S + F + S, '-': S + F + F,
+        '.': F + S + S, ',': F + S + F, '[': F * 2 + S, ']': F * 3
+    }
+
     full_bf = "".join(bf)
-    sys.stdout.buffer.write("".join([mapping.get(c, '') for c in full_bf]).encode('utf-8'))
+    out = "".join(mapping.get(c, '') for c in full_bf)
+    sys.stdout.buffer.write(out.encode('utf-8'))
 
 
 if __name__ == "__main__":
