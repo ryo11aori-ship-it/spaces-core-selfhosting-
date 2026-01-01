@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Underflow Fix)
+# Stage 12: Spaces Native Compiler (Pointer Underflow Fix)
 # Reads Spaces Source Code.
-# Fixes "Tape pointer underflow" by removing erroneous left shift.
+# Fixes "Tape pointer underflow" by correcting <<< to << in Check F.
 
 def main():
     bf = []
@@ -35,58 +35,46 @@ def main():
 
     # --- Helper: Read ONE Valid Bit ---
     def read_valid_bit(weight):
-        emit('[-]+[') # Start Search Loop (C0=1 to enter)
-        emit(',')     # Read Input to C0
+        emit('[-]+[') # Start Search Loop
+        emit(',')     # Read Input (C0)
         
         # --- Check EOF (0) ---
         emit('[') # If C0!=0
         
         # --- Check EOF (255) ---
-        # Logic: C1 = (C0 != 255)
-        emit('>[-]+<') # C1=1
-        emit('+') # C0 += 1
-        emit('[') # If C0!=0 (Original was not 255)
-        emit('-') # Restore C0
-        emit('>-<') # C1=0
+        emit('>[-]+< + [ - >-<') # Check 255
         
         # --- Check F (227) ---
-        # We are at C0. (FIXED: Removed erroneous '<')
+        # We are at C0.
+        # Copy C0 -> C1, C2. Restore C0 from C2.
+        # Layout: C0(Input), C1(Copy), C2(Copy)
+        emit('>[-]') # Clear C1
+        emit('< [>+>+<<-]') # C0 -> C1, C2
+        emit('>> [-<<+>>] <') # C2 -> C0. End at C1.
         
-        # Copy C0 to C2 and C3, Restore C0 from C3.
-        # Temp Layout: C0(Input), C1(0), C2(Copy), C3(Copy)
-        emit('>> [-] > [-] <<<') # Clear C2, C3. Back to C0.
-        emit('[ >>+>+<<<- ]') # Move C0 -> C2, C3
-        emit('>>> [-<<<+>>>] <') # Move C3 -> C0. We are at C2.
-        
-        # Compare C2 with 227
+        # Compare C1 with 227
         emit('-'*227)
-        # Result C2 is 0 if Match.
         
-        # Set C3=1 if Match (C2==0)
-        emit('>[-]+') # C3=1
-        emit('< [ >[-] < [-] ]') # If C2!=0, Clear C3, Clear C2.
+        # Result C1 is 0 if Match. Set C2=1 if Match.
+        emit('>[-]+') # C2=1
+        emit('< [ >[-] < [-] ]') # If C1!=0, Clear C2, Clear C1.
         
-        # If Match (C3=1)
-        emit('>') # To C3
+        # If Match (C2=1)
+        emit('>') # To C2
         emit('[') 
-        emit('<<< ,,') # Consume 80 80 at C0
+        # FIX: From C2, go to C0. Distance is 2.
+        emit('<< ,,') # Consume 80 80 at C0
         emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
-        emit('[-] <<< [-]') # Clear C3, Clear C0 to Exit Loop
-        # NOTE: We must end at C0 or ensure pointer consistency.
-        # After `<<< [-]`, we are at C0.
-        # But we are inside `[` of C3.
-        # We need to return to C3 to close loop? No, C3 is 0.
-        # We need to effectively break.
-        # Loop ends when C3 is 0.
-        # But we are currently at C0.
-        emit('>>>') # Back to C3 to satisfy loop
+        emit('[-]') # Clear C0 to Exit Loop
+        emit('>> [-]') # Clear C2
         emit(']') 
-        emit('<<<') # Back to C0
+        emit('<<') # Back to C0
         
         # --- Check S (32) ---
         emit('[') # If C0!=0 (Not F)
         
         # Copy C0 to C2, C3. Restore C0 from C3.
+        # Layout: C0, C1, C2(Copy), C3(Copy)
         emit('>> [-] > [-] <<<') 
         emit('[ >>+>+<<<- ]') 
         emit('>>> [-<<<+>>>] <') # We are at C2.
@@ -99,14 +87,15 @@ def main():
         
         emit('>') # To C3
         emit('[')
-        # Weight 0
-        emit('[-] <<< [-]') # Clear C3, Clear C0
-        emit('>>>') # Back to C3
+        # From C3, go to C0. Distance is 3.
+        emit('<<< [-]') # Clear C0 to Exit Loop
+        emit('>>> [-]') # Clear C3
         emit(']')
         emit('<<<') # Back to C0
         
         emit(']') # End Not F
         
+        emit('>>') # To C2 (Scratch position for loop logic)
         emit(']') # End Not 255
         
         # Handle EOF 255 (C1=1)
@@ -115,17 +104,14 @@ def main():
         emit('<') # To C0
         
         emit(']') # End Not 0
-        
-        # If C0 was cleared (Found S/F or EOF), Loop Ends.
         emit(']') # End Search Loop
 
     # --- MAIN LOOP ---
-    # Layout: C0=Input, C1-C3=Scratch, C4=Acc, C5=Flag
     emit('>>>>>') # To C5
     emit('[-]+')  # C5 = 1
     emit('[')     # Main Loop
     
-    emit('< [-]') # Clear C4
+    emit('< [-]') # Clear C4 (Accumulator)
     emit('<<<<')  # To C0
     
     # Read 3 Bits
