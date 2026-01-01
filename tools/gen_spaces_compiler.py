@@ -1,9 +1,5 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Clean & Robust)
-# Logic: Read -> Identify(S/F) -> Set Flags -> Exit Loop -> Process.
-# No extra comments or dead code to cause IndentationError.
-
 def main():
     bf = []
     def emit(s): bf.append(s)
@@ -34,96 +30,81 @@ def main():
         else: emit('.')
 
     # --- Helper: Read ONE Valid Bit ---
-    # C0: Input, C1: Copy, C2: FlagS, C3: FlagF, C4: Temp
     def read_valid_bit(weight):
         emit('[-]+[') 
-        emit(',') # Read C0
+        emit(',') 
         
         # Check EOF 0
         emit('[') 
         
         # Check EOF 255
-        # C1=1 if 255. C0 restored if not 255.
-        emit('>[-]+< + [ - >-< ]')
+        emit('>[-]+< + [ - >-< ]') 
         
         # If 255 (C1=1), Exit All
-        emit('>') # At C1
-        emit('[ >>>>>[-]<<<<< [-]<[-] ]') # Clear C6(MainFlag), C1, C0
-        emit('<') # At C0
+        emit('>') 
+        emit('[ >>>>>[-]<<<<< [-]<[-] ]') 
+        emit('<') 
         
-        # Clear Flags C2, C3
-        emit('>> [-] > [-] <<<')
+        # Copy C0 -> C1
+        emit('>>[-]<< [>>+>+<<<-] >>>[-<<<+>>>] <<')
         
-        # Copy C0 -> C1 using C4 as temp
-        # Layout: C0, C1, C2, C3, C4
-        emit('>>>> [-] <<<<') # Clear C4
-        emit('[ >+ >>>+ <<<< -] >>>> [- <<<<+>>>> ] <<<<') # C0->C1,C4 -> C0
+        # Check S (32) on C1. Set C2=1 if Match.
+        emit('>> [-]+ <<') 
+        emit('>' + '-'*32)
+        emit('[') 
+        emit('[-] > [-] <') 
+        emit(']')
         
-        # Check S (32) on C1
-        emit('>> [-]+ <<') # Assume S (C2=1)
-        emit('>' + '-'*32) # C1 -= 32
+        # Recopy C0->C1
+        emit('< [>>+>+<<<-] >>>[-<<<+>>>] <<')
         
-        emit('[') # If C1!=0 (Not S)
-            emit('[-] > [-] <') # Clear C1, Clear C2
-            
-            # Check F (227)
-            # Recopy C0 -> C1
-            emit('< [ >+ >>>+ <<<< -] >>>> [- <<<<+>>>> ] <<<<')
-            
-            emit('>>> [-]+ <<<') # Assume F (C3=1)
-            emit('>' + '-'*227) # C1 -= 227
-            
-            emit('[') # If C1!=0 (Not F -> Garbage)
-                emit('[-] >> [-] <<') # Clear C1, Clear C3
-            emit(']')
-        emit(']') # End Not S
+        # Check F (227). Set C3=1 if Match.
+        emit('>>> [-]+ <<<') 
+        emit('>' + '-'*227)
+        emit('[') 
+        emit('[-] >> [-] <<') 
+        emit(']')
         
-        # If C2 or C3 is set, Clear C0 to Exit Loop
-        emit('>>') # At C2
-        emit('[ << [-] >> - + ]') # If C2, Clear C0, Keep C2
-        emit('>') # At C3
-        emit('[ <<< [-] >>> - + ]') # If C3, Clear C0, Keep C3
+        # Check Flags C2/C3. If set, Clear C0 to Exit.
+        emit('>') 
+        emit('[ << [-] >> - + ]') 
+        emit('>') 
+        emit('[ <<< [-] >>> - + ]') 
         
-        emit('<<<') # Back to C0
-        emit(']') # End Not 0 (EOF check)
-        emit(']') # End Search Loop
+        emit('<<<') 
+        emit(']') 
+        emit(']') 
+        emit(']') 
         
-        # --- Process Flags ---
+        # --- ACTION ---
         # If F (C3=1)
-        emit('>>>') # At C3
+        emit('>>>') 
         emit('[')
-        emit('[-] <<<< ,,') # Clear C3, Consume 2 bytes at C0
-        emit('>>>>>' + '+'*weight + '<<<<<') # Add to C5 (Acc)
-        emit('>>>') # Back to C3
+        emit('[-] <<<< ,,') 
+        emit('>>>>>' + '+'*weight + '<<<<<') 
+        emit('>>>') 
         emit(']')
         
         # If S (C2=1)
-        emit('< [-]') # Clear C2
+        emit('< [-]') 
         
-        emit('<<') # Back to C0
+        emit('<<') 
 
     # --- MAIN LOOP ---
-    # C0: Input
-    # C1-C4: Scratch/Flags
-    # C5: Opcode Accumulator
-    # C6: Main Loop Flag
+    emit('>>>>>>') 
+    emit('[-]+') 
+    emit('[') 
     
-    emit('>>>>>>') # To C6
-    emit('[-]+')  # C6 = 1
-    emit('[')     # Main Loop
+    emit('< [-]') 
+    emit('<<<<<') 
     
-    emit('< [-]') # Clear C5
-    emit('<<<<<')  # To C0
-    
-    # Read 3 Bits
     read_valid_bit(4)
-    emit('>>>>>> [ <<<<<<') # Check Main Flag C6
+    emit('>>>>>> [ <<<<<<') 
     read_valid_bit(2)
     emit('>>>>>> [ <<<<<<') 
     read_valid_bit(1)
     emit('>>>>>> [ <<<<<<') 
     
-    # Process Opcode in C5
     emit('>>>>>') 
     
     def emit_bytes(bs):
@@ -174,11 +155,11 @@ def main():
     emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff]) 
     emit('[-]] <')
     
-    emit('>') # To C6
-    emit('] ] ]') # Close checks
-    emit(']') # End Main Loop
+    emit('>') 
+    emit('] ] ]') 
+    emit(']') 
     
-    # --- PADDING ---
+    # Padding
     emit('>>[-]' + '+'*255 + '[>[-]' + '+'*255 + '[>.< -]<-]')
     emit('>>[-]' + '+'*255 + '[>[-]' + '+'*255 + '[>.< -]<-]')
 
