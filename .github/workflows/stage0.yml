@@ -73,3 +73,49 @@ jobs:
             hello.spaces
             hello_spaces.elf
             output.txt
+      # ... (前のステップ：ディレクトリ作成やビルドなど) ...
+
+      - name: Generate Smart Compiler
+        run: |
+          # 1. コンパイラ（Spacesコード）を生成
+          python3 tools/gen_smart_compiler.py > spaces/self/smart_compiler.spaces
+
+      - name: Compile hello.spaces using Smart Compiler
+        run: |
+          # 事前確認: 入力ファイル hello.spaces があるか確認（なければ前の手順で作る必要がありますが、今回はある前提）
+          ls -l hello.spaces
+          
+          # 2. Spacesコンパイラを実行（入力として hello.spaces を与える）
+          # VMが spaces/self/smart_compiler.spaces を実行し、
+          # そのプログラムが hello.spaces を読み込んで、hello_smart.elf を吐き出します
+          ./bin/ref_vm spaces/self/smart_compiler.spaces < hello.spaces > hello_smart.elf
+
+      - name: Verify Smart Compiler Output
+        run: |
+          # 3. 生成されたバイナリを実行権限付与
+          chmod +x hello_smart.elf
+
+          # 期待値の取得: hello.spaces の先頭1バイトを数値(0-255)として取得
+          # (odコマンドを使っています)
+          EXPECTED_CODE=$(od -An -t u1 -N 1 hello.spaces | tr -d ' \n')
+          echo "Expected Exit Code (First byte of input): $EXPECTED_CODE"
+
+          # 4. 実行して終了コードを確認
+          # set +e: 終了コードが0以外でもActionを即停止させないためのおまじない
+          set +e
+          ./hello_smart.elf
+          ACTUAL_CODE=$?
+          set -e
+
+          echo "Actual Exit Code: $ACTUAL_CODE"
+
+          # 判定
+          if [ "$ACTUAL_CODE" -eq "$EXPECTED_CODE" ]; then
+            echo "🎉 SUCCESS: Exit code reflects the input file content!"
+            echo "Input byte: $EXPECTED_CODE, Output exit code: $ACTUAL_CODE"
+          else
+            echo "❌ FAILED: Exit code does not match."
+            echo "Expected: $EXPECTED_CODE, Got: $ACTUAL_CODE"
+            exit 1
+          fi
+
