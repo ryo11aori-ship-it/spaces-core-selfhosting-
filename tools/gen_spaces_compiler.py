@@ -1,9 +1,9 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Simple State Machine)
+# Stage 12: Spaces Native Compiler (Final Fix)
 # Reads Spaces Source Code.
-# Logic: Read -> Check EOF -> Check Valid -> Process.
-# GUARANTEED to stop on EOF.
+# Logic: Simple State Machine (Read -> Check EOF -> Check Valid -> Loop/Exit).
+# Features: Padding Restored, Infinite Loop Fixed.
 
 def main():
     bf = []
@@ -34,105 +34,63 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # --- Helper: Read ONE Valid Bit (0 or 1) ---
-    # Returns: Adds 'weight' to C3 if Bit is 1.
-    # Logic:
-    #   Loop forever:
-    #     Read Char (C0).
-    #     If C0 == 0 or 255: Hard Exit (Jump to End).
-    #     If C0 == F (227): Consume 2 bytes, Add Weight, Break Loop.
-    #     If C0 == S (32): Break Loop (Add 0).
-    #     Else: Continue Loop (Ignore Garbage).
-    
+    # --- Helper: Read ONE Valid Bit ---
+    # Scans input until S or F is found. Ignores Garbage.
+    # Handles EOF (0 or 255) by clearing C0.
     def read_valid_bit(weight):
-        emit('[-]+[') # Start Search Loop (C0=1 dummy)
+        emit('[-]+[') # Start Loop (Assume C0=1 to enter)
         emit(',')     # Read C0
         
-        # --- 1. EOF Check (0) ---
-        emit('[') # If C0 != 0
+        # Check EOF (0)
+        emit('[')     # If C0!=0
         
-        # --- 2. EOF Check (255) ---
-        emit('>[-]+< + [ - >-<') # Check 255
-        # If Not 255, C1=0.
+        # Check EOF (255)
+        emit('>[-]+< + [ - >-<') # C1=0 if Not 255
         
-        # --- 3. Check F (227) ---
-        # Copy C0->C2
+        # Check F (227)
         emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
         emit('>>' + '-'*227) 
-        emit('>[-]+< [>[-]<[-]]') # C3 = 1 if F
+        emit('>[-]+< [>[-]<[-]]') # C3=1 if F
         
         emit('>>> [') # If F
         emit('<<< ,,') # Consume 80 80
-        # Add Weight to Accumulator (C3 is effectively C4 in main, wait.)
-        # Caller uses C3 as Accumulator.
-        # This helper uses C0(Input), C1(Scratch), C2(Scratch), C3(Flag).
-        # We need to add to Main Accumulator (Let's say C4).
-        emit('>>>>' + '+'*weight + '<<<<') 
-        
-        # Clear Flag C3, Clear C0 to Exit Loop
-        emit('[-] <<< [-] >>>')
+        emit('>>>>' + '+'*weight + '<<<<') # Add Weight
+        emit('[-] <<< [-] >>>') # Clear C3, Clear C0 -> Exit Loop
         emit(']') 
         
-        # --- 4. Check S (32) ---
+        # Check S (32)
         emit('<<<') # Back to C0
-        emit('[') # If C0 != 0 (Not F)
+        emit('[') # If C0!=0 (Not F)
         
-        # Copy C0->C2
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <')
-        emit('>>' + '-'*32)
-        emit('>[-]+< [>[-]<[-]]') # C3 = 1 if S
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
+        emit('>>' + '-'*32) 
+        emit('>[-]+< [>[-]<[-]]') # C3=1 if S
         
         emit('>>> [') # If S
-        # Do nothing (Weight 0)
-        # Clear Flag C3, Clear C0 to Exit Loop
-        emit('[-] <<< [-] >>>')
+        # Weight 0
+        emit('[-] <<< [-] >>>') # Clear C3, Clear C0 -> Exit Loop
         emit(']')
         
         emit('<<<') # Back to C0
         emit(']') # End Not F
         
-        # If C0 is still != 0, it is garbage.
-        # We continue loop.
-        
-        emit('>>') # To C2 (Scratch, 0)
+        emit('>>') # To C2 (Scratch)
         emit(']') # End Not 255
         
-        # If C1 is 1 (Was 255), we must EXIT EVERYTHING.
-        # We set a Global Exit Flag? 
-        # Or we just clear C0 and set a special flag?
-        # Let's use C5 (Main Loop Flag) to 0.
+        # If C1=1 (Was 255/EOF), Clear C0 to ensure Exit
         emit('>') # To C1
-        emit('[') # If 255
-        emit('>>>> [-] <<<<') # Clear C5
-        emit('[-] < [-]') # Clear C1, Clear C0
-        emit(']')
+        emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5(MainFlag), C1, C0
         emit('<') # To C0
         
-        emit(']') # End Not 0 (EOF Check 0)
+        emit(']') # End Not 0 (EOF)
+        # If C0 was 0 (EOF), Loop exits.
         
-        # If C0 was 0, loop ends naturally.
-        # But we need to check if we should abort main loop.
-        # If C0 was 0, we didn't process anything.
-        # Set C5 = 0.
-        # We can check if C0 was 0 by inverting?
-        # Actually, simpler:
-        # If the Search Loop finishes, it means we found S/F OR we hit EOF.
-        # If EOF, C0 is 0. If S/F, C0 is 0 (cleared manually).
-        # How to distinguish?
-        # Use C6 as "Found Valid" flag?
-        
-        # REVISED STRATEGY:
-        # If EOF detected, set C5=0.
-        # Always check C5 before continuing.
-        pass
+        # If C0 was Garbage (Not 0, 255, S, F):
+        # The checks didn't clear C0.
+        # Loop repeats -> Reads next char.
         emit(']') # End Search Loop
 
     # --- MAIN LOOP ---
-    # C0: Input
-    # C1, C2, C3: Scratch
-    # C4: Opcode Accumulator
-    # C5: Main Loop Flag (1=Run, 0=Stop)
-    
     emit('>>>>>') # To C5
     emit('[-]+')  # C5 = 1
     emit('[')     # Main Loop
@@ -140,18 +98,11 @@ def main():
     emit('< [-]') # Clear C4 (Accumulator)
     emit('<<<<')  # To C0
     
-    # Read 3 Bits.
-    # We must check C5 after each read to abort immediately.
-    
-    # Bit 1 (Weight 4)
+    # Read 3 Bits
     read_valid_bit(4)
-    emit('>>>>> [ <<<<<') # Check C5. If 1, Continue.
-    
-    # Bit 2 (Weight 2)
+    emit('>>>>> [ <<<<<') # Check C5
     read_valid_bit(2)
     emit('>>>>> [ <<<<<') 
-    
-    # Bit 3 (Weight 1)
     read_valid_bit(1)
     emit('>>>>> [ <<<<<') 
     
@@ -207,10 +158,13 @@ def main():
     emit('[-]] <')
     
     emit('>') # To C5
-    # Dummy brackets to close the "If C5" checks
     emit('] ] ]') 
     emit(']') # End Main Loop
     
+    # --- PADDING (Restored!) ---
+    # Emit 64KB zeros to satisfy ELF header
+    emit('>>[-]' + '+'*255 + '[>[-]' + '+'*255 + '[>.< -]<-]')
+
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     full_bf = "".join(bf)
