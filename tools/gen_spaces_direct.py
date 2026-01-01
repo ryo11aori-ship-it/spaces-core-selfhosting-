@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Direct Mode)
-# Fix: Corrected IndentationError.
-#      Ensures ELF binary is padded to exactly 32KB (0x8000).
-#      Implements robust parser to skip garbage characters without infinite loops.
+# Fix: Added SAFETY LIMITERS to force stop infinite loops.
+#      1. Reduced p_filesz to 4KB (was 32KB).
+#      2. Added Instruction Limit (Max 255 instructions).
+#      3. Added Token Search Limit.
 
 import sys
 
@@ -30,69 +31,27 @@ def clear():
     loop_end()
 
 # --- TRACKED OUTPUT SYSTEM ---
-# We track the number of bytes emitted to ensure alignment.
-# C7: Low Byte Counter
-# C8: High Byte Counter
-# C9: Scratch for overflow check
+# C7: Low Byte Counter, C8: High Byte Counter
 # C0: Working Cursor
 
 def emit_byte_tracked(val):
-    # 1. Output the byte
-    right(9)
-    clear()
-    inc(val)
-    out()
-    clear()
-    left(9)
+    # Output byte
+    right(9); clear(); inc(val); out(); clear(); left(9)
     
-    # 2. Increment Counter (C7/C8)
-    right(7)
-    inc()
+    # Increment Counter (C7)
+    right(7); inc()
     
-    # Check for overflow (256 -> 0)
-    # Use C9 to check if C7 became 0
-    right(2)
-    clear()
-    left(2)
+    # Check Overflow C7 (256->0)
+    right(2); clear(); left(2) # C9=0
+    # Copy C7->C9
+    loop_start(); right(2); inc(); left(2); dec(); loop_end()
+    right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
     
-    # Copy C7 to C9
-    loop_start()
-    right(2)
-    inc()
-    left(2)
-    dec()
-    loop_end()
-    
-    right(2)
-    loop_start()
-    left(2)
-    inc()
-    right(2)
-    dec()
-    loop_end()
-    
-    # If C9 is 0, then C7 was 0 (Overflow occurred).
-    # Logic: Set C1 (Scratch) = 1. If C9!=0, Set C1=0.
-    left(9) # Back to C0. C1 is scratch.
-    right()
-    clear()
-    inc() # C1=1
-    right(8) # At C9
-    
-    loop_start() # If C9!=0
-    left(8)
-    clear() # C1=0
-    right(8)
-    clear() # Clear C9
-    loop_end()
-    
+    # Check if C9==0. Use C1 as flag.
+    left(9); right(); clear(); inc(); right(8) # C1=1, At C9
+    loop_start(); left(8); clear(); right(8); clear(); loop_end() # If C9!=0, C1=0
     left(8) # At C1
-    loop_start() # If C1==1 (Overflow confirmed)
-    clear()
-    right(7)
-    inc() # Increment C8 (High Byte)
-    left(7)
-    loop_end()
+    loop_start(); clear(); right(7); inc(); left(7); loop_end() # If C1==1, Inc C8
     
     left() # Back to C0
 
@@ -102,12 +61,11 @@ def emit_machine_code_tracked(bytes_list):
 
 def main():
     # 1. Safety Margin
-    right(10)
+    right(12) # Use up to C11
 
     # 2. ELF Header (64-bit Linux)
-    # p_filesz = 0x8000 (32768 bytes)
+    # p_filesz = 0x1000 (4096 bytes) -> Much faster padding
     # p_memsz = 0x20000 (131072 bytes)
-    # Message Address = 0x404000 (Offset 0x4000)
     
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
@@ -122,7 +80,7 @@ def main():
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Filesz 0x8000
+        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Filesz 0x1000 (4KB)
         0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, # Memsz 0x20000
         0x00, 10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     ]
@@ -133,59 +91,63 @@ def main():
     for b in init_code: emit_byte_tracked(b)
 
     # 4. COMPILER LOGIC
-    # C0: Input
-    # C1: Scratch
-    # C2: Loop Flag (1=Run, 0=Stop)
-    # C3: Check Flag
-    # C4: EOF Flag
-    # C5: Token Result
-    # C6: Acc
-
+    # C10: Instruction Counter (Safety Limiter)
+    # C11: Token Search Limiter
+    
     def emit_read_token_logic():
-        right(4); clear(); left(4) # Clear C4
-        right(5); clear(); left(5) # Clear C5
+        right(4); clear(); left(4) # Clear EOF
+        right(5); clear(); left(5) # Clear Result
         
-        # Start Loop C2=1
+        # Start Search Loop C2=1
         right(2); clear(); inc(); loop_start(); left(2)
+        
+        # SAFETY CHECK: Increment Search Limiter C11
+        right(11); inc(); left(11)
+        # If C11 overflows (256 tries), Force EOF.
+        # Copy C11->C9
+        right(9); clear(); left(9)
+        right(11); loop_start(); left(2); inc(); right(2); dec(); loop_end()
+        right(11); loop_start(); left(2); inc(); right(2); dec(); loop_end(); left(11)
+        # Check if C9==0 (Overflowed 0)
+        # Using logic: If C9!=0 set Flag=0.
+        right(); clear(); inc(); right(7) # C1=1, At C9
+        loop_start(); left(8); clear(); right(8); clear(); loop_end()
+        left(8) # At C1
+        # If C1==1 (Overflowed), Set EOF(C4)=1, Break C2
+        loop_start()
+        clear(); right(3); inc(); left(2); dec(); right(2); clear() # C11=0
+        left(4)
+        loop_end()
+        left() # At C0
         
         inp() # Read C0
         
         # Check EOF(0)
         right(3); clear(); left(3)
-        # Copy C0->C3
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-        # If C0 was 0, C3 is 0. If C0!=0, C3!=0.
-        # We need Flag=1 if C0=0.
         right(); inc(); right(2); clear(); inc(); left(2); dec()
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
-        # If C3 was 0 (EOF), C1 is 1.
         right(2); loop_start(); clear(); right(); inc(); left(2); dec(); right(); loop_end(); left(3)
         
         # Check S(32)
-        right(2); loop_start(); left(2) # If C2
+        right(2); loop_start(); left(2)
         right(3); clear(); left(3)
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-        right(); dec(32)
-        right(2); clear(); inc(); left(2)
+        right(); dec(32); right(2); clear(); inc(); left(2)
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
-        # If C1==0 (Match), Set C3=1
         right(2); loop_start(); clear(); left(); dec(); right(); loop_end(); left(3)
         right(2); loop_end(); left(2)
         
         # Check F(227)
-        right(2); loop_start(); left(2) # If C2
+        right(2); loop_start(); left(2)
         right(3); clear(); left(3)
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-        right(); dec(227)
-        right(2); clear(); inc(); left(2)
+        right(); dec(227); right(2); clear(); inc(); left(2)
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
-        # If C1==0 (Match)
-        right(2); loop_start()
-        clear(); right(2); inc(); left(2); left(3); inp(); inp(); right(3); left(); dec(); right()
-        loop_end(); left(3)
+        right(2); loop_start(); clear(); right(2); inc(); left(2); left(3); inp(); inp(); right(3); left(); dec(); right(); loop_end(); left(3)
         right(2); loop_end(); left(2)
         
         # Loop End C2
@@ -193,8 +155,22 @@ def main():
 
     # 5. MAIN LOOP
     right(6); clear(); left(6)
+    right(10); clear(); left(10) # Safety Counter
+    
     right(2); clear(); inc(); loop_start(); left(2)
     
+    # SAFETY: Increment Main Counter C10
+    right(10); inc()
+    # Check if C10 wraps to 0 (Max 256 instructions)
+    right(2); clear(); left(12); right(10); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(10); loop_start(); left(2); inc(); right(2); dec(); loop_end(); left(10)
+    # Check C12 (Copy). If 0, then 256 reached.
+    left(9); right(); clear(); inc(); right(10) # C1=1, At C12
+    loop_start(); left(11); clear(); right(11); clear(); loop_end()
+    left(11) # At C1
+    # If C1==1, Break Main Loop (C2=0)
+    loop_start(); clear(); right(); dec(); left(); loop_end()
+    left() # At C0
+
     right(6); clear(); left(6)
     emit_read_token_logic()
     right(4); loop_start(); clear(); left(2); dec(); right(2); loop_end(); left(4)
@@ -208,8 +184,8 @@ def main():
     right(4); loop_start(); clear(); left(2); dec(); right(2); loop_end(); left(4)
     right(5); loop_start(); dec(); right(); inc(1); left(); loop_end(); left(5)
     
-    # Message Address: 0x404000
-    msg_addr = 0x404000
+    # Message Address: 0x400200 (at offset 0x200)
+    msg_addr = 0x400200
     addr_bytes = [(msg_addr >> (8*i)) & 0xFF for i in range(8)]
     
     right(6); inc()
@@ -227,20 +203,11 @@ def main():
     left(6)
     right(2); loop_end(); left(2)
 
-    # 6. PADDING PHASE 1: Pad until 16KB (0x4000 = 64 * 256)
-    # C8 is High Byte Counter. We want C8 == 64.
-    
-    right(8)
-    dec(64)
-    loop_start()
-    inc(64)
-    left(8)
-    emit_byte_tracked(0)
-    right(8)
-    dec(64)
-    loop_end()
-    inc(64)
-    left(8)
+    # 6. PADDING PHASE 1: Pad until 512 (0x200) for Message
+    # C8==2
+    right(8); dec(2)
+    loop_start(); inc(2); left(8); emit_byte_tracked(0); right(8); dec(2); loop_end()
+    inc(2); left(8)
 
     # 7. EMIT MESSAGE
     msg = [
@@ -249,25 +216,15 @@ def main():
     ]
     for b in msg: emit_byte_tracked(b)
 
-    # 8. PADDING PHASE 2: Pad until 32KB (0x8000 = 128 * 256)
-    # We want C8 == 128.
-    
-    right(8)
-    dec(128)
-    loop_start()
-    inc(128)
-    left(8)
-    emit_byte_tracked(0)
-    right(8)
-    dec(128)
-    loop_end()
-    inc(128)
-    left(8)
+    # 8. PADDING PHASE 2: Pad until 4KB (0x1000 = 16 * 256)
+    # C8==16
+    right(8); dec(16)
+    loop_start(); inc(16); left(8); emit_byte_tracked(0); right(8); dec(16); loop_end()
+    inc(16); left(8)
 
     # Output
     sys.stdout.buffer.write("".join(CMDS).encode('utf-8'))
     
-    # CI Log
     with open("bf_debug.log", "w") as f:
         f.write("Direct Generation Complete.\n")
 
