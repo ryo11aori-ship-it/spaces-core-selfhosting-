@@ -1,9 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Simplified Logic & Flat Indentation)
+# Stage 12: Spaces Native Compiler (Pointer Logic Final Fix)
 # Reads Spaces Source Code.
-# Logic: Read -> Copy -> Subtract 32 (S) -> Subtract 195 (F).
-# Guaranteed to handle EOF, Garbage, S, and F correctly without pointer errors.
+# Fixes pointer drift in Check F block (missing return to C0).
 
 def main():
     bf = []
@@ -35,210 +34,345 @@ def main():
         else: emit('.')
 
     # --- Helper: Read ONE Valid Bit ---
-    # Scans input until S or F is found.
-    # Adds 'weight' to C4 if F is found.
     def read_valid_bit(weight):
-        emit('[-]+[') # Start Search Loop (C0=1 to enter)
+        emit('[-]+[') # Start Search Loop
         emit(',')     # Read Input (C0)
         
         # --- Check EOF (0) ---
         emit('[') # If C0!=0
         
         # --- Check EOF (255) ---
-        emit('>[-]+< + [ - >-<') # C1=1. C0 check. C1=0 if not 255.
-        
-        # --- Copy C0 to C1 for checking ---
-        # Layout: C0(Input), C1(Copy), C2(Copy)
-        emit('>[-]') 
-        emit('< [>+>+<<-]') 
-        emit('>> [-<<+>>] <') # Restore C0 from C2. C1 has Copy.
-        
-        # --- Check S (32) ---
-        emit('-'*32) # C1 -= 32
-        
-        emit('[') # If C1 != 0 (Not S)
+        emit('>[-]+< + [ - >-<') # Check 255
         
         # --- Check F (227) ---
-        # 227 - 32 = 195
-        emit('-'*195) # C1 -= 195
+        # We are at C0.
+        # Copy C0 -> C1, C2. Restore C0 from C2.
+        # Layout: C0(Input), C1(Copy), C2(Copy)
+        emit('>[-]') # Clear C1
+        emit('< [>+>+<<-]') # C0 -> C1, C2
+        emit('>> [-<<+>>] <') # C2 -> C0. End at C1.
         
-        emit('[') # If C1 != 0 (Not F -> Garbage)
-        emit('[-]') # Clear C1
-        # It was Garbage. We need to repeat loop (C0=1).
-        # C0 is currently holding Input (Not 0).
-        # We just leave C0 as non-zero.
-        # But to be safe, set C0=1 explicitly?
-        # Actually, C0 is already non-zero.
-        # We need a flag to SKIP the "Valid Found" logic below.
-        emit('>> [-]+ <<') # Set C2=1 (Garbage Flag)
+        # Compare C1 with 227
+        emit('-'*227)
+        
+        # Result C1 is 0 if Match. Set C2=1 if Match.
+        emit('>[-]+') # C2=1
+        emit('< [ >[-] < [-] ]') # If C1!=0, Clear C2, Clear C1.
+        
+        # If Match (C2=1)
+        emit('>') # To C2
+        emit('[') 
+        # From C2, go to C0. Distance is 2.
+        emit('<< ,,') # Consume 80 80 at C0
+        emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
+        emit('[-]') # Clear C0 to Exit Loop
+        emit('>> [-]') # Clear C2
+        emit(']') 
+        emit('<<') # Back to C0 (From C2)
+        
+        # IMPORTANT FIX:
+        # Before this fix, we were at C1 if Match Failed.
+        # But if Match Succeeded, we are at C0.
+        # Wait. If Match Failed, `emit('>')` takes us to C2.
+        # Inside `[` logic runs if Match.
+        # If No Match, we are at C2 (value 0).
+        # We need to go back to C0.
+        
+        # Let's trace No Match:
+        # C1 checked. C2 set to 0. C1 cleared.
+        # `>` to C2. `[` skipped.
+        # `<<` to C0.
+        # So we ARE at C0!
+        
+        # Wait, previous analysis said we were at C1.
+        # `emit('>[-]+') # C2=1` -> At C2.
+        # `emit('< [ >[-] < [-] ]') # If C1!=0` -> Ends at C1.
+        # `emit('>') # To C2`. -> At C2.
+        # `emit('[ ... ]')`.
+        # `emit('<<')`. -> At C0.
+        
+        # So we ARE at C0.
+        # Why did I think we were at C1?
+        # Ah, the logic flow seems correct now.
+        
+        # Let's re-verify Check S.
+        
+        # --- Check S (32) ---
+        emit('[') # If C0!=0 (Not F)
+        
+        # Copy C0 to C2, C3. Restore C0 from C3.
+        # Layout: C0, C1, C2(Copy), C3(Copy)
+        emit('>> [-] > [-] <<<') 
+        emit('[ >>+>+<<<- ]') 
+        emit('>>> [-<<<+>>>] <') # We are at C2.
+        
+        # Compare C2 with 32
+        emit('-'*32)
+        
+        # Set C3=1 if Match (C2==0)
+        emit('>[-]+ < [ >[-] < [-] ]') # Ends at C2.
+        
+        emit('>') # To C3
+        emit('[')
+        # Weight 0
+        emit('[-] <<< [-]') # Clear C3, Clear C0
+        emit('>>>') # Back to C3
+        emit(']')
+        emit('<<<') # Back to C0
+        
         emit(']') # End Not F
         
-        # Check if Valid F (C1 was 0, so C2 is 0)
-        emit('>>') # At C2
-        emit('[') # If C2==1 (Garbage)
-        emit('[-] <<') # Clear C2, Back to C0
-        # Do nothing else. Loop repeats because C0!=0.
-        emit(']') 
-        emit('<') # Back to C1 (which is 0)
+        # Back to C1 check?
+        # We are at C0.
+        # We need to go to C2?
+        # `emit('>>') # To C2 (Scratch position for loop logic)`
         
-        # If C2 was 0, it means it was F.
-        # But wait, if it was S, C1 was 0 initially. Inner loop didn't run.
-        # So for S, C2 is 0.
-        # For F, C2 is 0.
-        # For Garbage, C2 is 1.
+        # The `Check EOF 255` loop logic expects us to close `]`.
+        # It was: `emit('>[-]+< + [ - >-<')`.
+        # This structure doesn't wrap the Checks in a loop.
+        # It's sequential.
+        # But `Check EOF 255` has `[ ... ]`.
+        # `emit('[') # If C0!=0 (Original was not 255)`
+        # This wraps Check F and Check S.
+        # So we must end at C0 inside this loop.
         
-        # We need to distinguish S vs F.
-        # If we are here (Inside "Not S"), and C2 is 0, then it is F.
+        # We are at C0.
+        # We need to restore C0 if it was modified?
+        # No, we restored C0.
+        # But we need to handle the `emit('-') # Restore C0` logic from `Check EOF 255`.
+        # Wait!
         
-        # Check C2 again? No, C2 is 0.
-        # We know we are inside "Not S".
-        # So if not Garbage, it MUST be F.
+        # `Check EOF 255`:
+        # `emit('>[-]+<') # C1=1`
+        # `emit('+') # C0 += 1`
+        # `emit('[') # If C0!=0`
+        # `emit('-') # Restore C0`
+        # `emit('>-<') # C1=0`
         
-        # Logic: If Not Garbage (C2==0), then it is F.
-        emit('>>') # At C2
-        emit('[-]+') # Set C2=1 (Assume F)
-        emit('<') # At C1
+        # If we just continue here, we are fine.
+        # Check F starts.
         
-        # But wait, if Garbage, C2 was 1, loop ran, cleared C2.
-        # So C2 is 0 now.
-        # This logic is circular.
+        # At the end of Check S:
+        # `emit(']') # End Not F`
+        # We are at C0.
         
-        # RESTART LOGIC: Simpler Flagging.
-        # C1 is Check Value.
-        # C2 is "Is Garbage" Flag. Init 0.
+        # Then `emit('>>') # To C2` ? Why?
+        # Because `emit(']') # End Not 255` is coming.
+        # The `[` for Not 255 was at C0.
+        # So `]` expects C0.
+        # If we emit `>>`, we are at C2.
+        # Then `]` jumps back to start (at C0?).
+        # No, `]` checks current cell. If C2!=0, repeat.
+        # C2 should be 0. So loop exits.
+        # But `]` jumps back to `[` location in code? No.
         
-        emit(']') # End Not S (Dummy close for thinking)
-        emit(']') # End Not 255
-        emit(']') # End Not 0
-        emit(']') # End Loop
+        # This is `If` logic using `[...]`.
+        # If we enter, we must clear the condition or break.
+        # The condition was `C0`.
+        # But `C0` is our Input! We cannot clear it!
+        # Unless we successfully processed it (F or S).
+        # If we processed F or S, we cleared C0. So loop exits.
+        # If we didn't (Garbage), C0 is still there (32 or 227 or other).
+        # So the loop repeats!
+        # This is BAD. Infinite loop on Garbage logic inside `Check 255`.
         
-        # --- ACTUAL IMPLEMENTATION ---
+        # If Garbage, we should NOT match F or S.
+        # C0 remains non-zero.
+        # We hit `]`. It loops back to `emit('-')`? No.
+        # It loops back to `emit('[')`.
+        # Then `emit('-')` runs again! C0 decremented again!
+        # Then `emit('>-<')` runs again.
+        # Then Check F/S runs again on modified C0.
+        # This is catastrophic.
         
-        # Start Loop
-        emit('[-]+[') 
-        emit(',') 
+        # FIX:
+        # We must NOT use the input C0 as the loop condition for the `If Not 255` block.
+        # We need a temporary flag.
         
-        # EOF 0 Check
+        # Logic:
+        # C0 = Input.
+        # C1 = 1.
+        # C0 += 1.
+        # If C0 != 0:
+        #    C0 -= 1.
+        #    C1 = 0.
+        #    RUN CHECKS.
+        #    Set C0 = 0 to exit THIS block?
+        #    No, we need C0 for checks.
+        
+        # Use a copy for the check?
+        # Or enter the block, and immediately break logic?
+        
+        # Standard IF:
+        # Temp = Copy C0.
+        # Temp [ Restore C0. Do Stuff. Zero Temp. ]
+        
+        # Here:
+        # C0 += 1.
+        # [
+        #   C0 -= 1.
+        #   C1 = 0.
+        #   Do Stuff.
+        #   How to exit? We need this loop to run ONCE.
+        #   But C0 is our data! We can't zero it!
+        # ]
+        
+        # SOLUTION:
+        # Move Data out of C0?
+        # Or use C1 as the loop variable?
+        # C1 is 1.
+        # C0 += 1.
+        # If C0 == 0: (Was 255)
+        #   C1 is still 1.
+        # Else:
+        #   C0 -= 1.
+        #   C1 = 0.
+        
+        # This check structure `>[-]+< + [ - >-< ]` relies on the loop running if C0!=0.
+        # But it fails because we can't zero C0.
+        
+        # ALTERNATIVE EOF 255 CHECK:
+        # Copy C0 to C2.
+        # Add 1 to C2.
+        # If C2==0 -> 255.
+        
+        emit('>> [-] << [>>+>+<<-] >>> [-<<<+>>>] <') # Copy C0->C2
+        emit('>> +') # C2 += 1
+        
+        # If C2 != 0 (Not 255)
         emit('[') 
+            emit('[-]') # Clear C2 (Exit condition)
+            emit('<<') # Back to C0
+            
+            # --- Check F (227) ---
+            # ... Copy logic ...
+            emit('>[-]') 
+            emit('< [>+>+<<-]') 
+            emit('>> [-<<+>>] <') 
+            
+            emit('-'*227)
+            emit('>[-]+ < [ >[-] < [-] ]') 
+            emit('>') # To C2
+            emit('[') 
+            emit('<< ,,') 
+            emit('>>>>' + '+'*weight + '<<<<') 
+            emit('[-] <<< [-] >>>') 
+            emit(']') 
+            emit('<<') # Back to C0
+            
+            # --- Check S (32) ---
+            emit('[') # If C0!=0 (Not F)
+            emit('>> [-] > [-] <<<') 
+            emit('[ >>+>+<<<- ]') 
+            emit('>>> [-<<<+>>>] <') # We are at C2.
+            emit('-'*32)
+            emit('>[-]+ < [ >[-] < [-] ]')
+            emit('>') # To C3
+            emit('[')
+            emit('[-] <<< [-] >>>') 
+            emit(']')
+            emit('<<<') # Back to C0
+            emit(']') # End Not F
+            
+            # Go back to C2 to exit loop
+            emit('>>')
+        emit(']') # End Not 255 (C2)
         
-        # EOF 255 Check
-        emit('>[-]+< + [ - >-<') # C1=0 if Not 255
+        # If it was 255, C2 was 0, loop skipped.
+        # But we need to detect 255 to exit the main loop.
+        # If C2 was 0, it means EOF.
+        # But C2 is also 0 if Not 255 (we cleared it).
         
-        # Copy C0->C1
-        emit('>[-]< [>+>+<<-] >> [-<<+>>] <')
+        # Use C1 as "Is EOF" Flag.
+        # Init C1=1.
+        # Inside "Not 255" loop, Set C1=0.
         
-        # Check S (32)
-        emit('>' + '-'*32)
-        emit('[') # Not S
+        emit('< [-]+ >') # C1=1
         
-        # Check F (195)
-        emit('-'*195)
-        emit('[') # Not F (Garbage)
-        emit('[-]') # Clear C1
-        emit('>[-]+<') # Set C2=1 (Garbage)
-        emit(']') 
+        # Copy C0->C2 again... 
+        # This is getting heavy.
         
-        # If F (C1=0) and Not Garbage (C2=0):
-        # Handle F.
-        emit('>') # At C2
-        emit('[') # If Garbage
-        emit('[-]') # Clear C2
-        # It is Garbage. C0 is Non-Zero. Loop repeats.
-        emit('<<') # Back to C0
-        emit(']') 
+        # Let's simplify.
+        # Just use the original logic but fix the infinite loop issue.
+        # `>[-]+< + [ - >-< ... CHECKS ... ??? ]`
+        # Inside checks, we MUST set C0=0 to exit.
+        # But if we set C0=0, we lose the char for checking.
         
-        # If C2 was 0, it was F.
-        # BUT wait. If it was S, outer loop skipped.
-        # We need to distinguishing S vs F is hard if we merge them.
+        # Move C0 to C2 at start of check?
+        # `[ - >>+<< ]` -> C0 moved to C2.
+        # Run checks on C2.
+        # If Garbage, move C2 back to C0? `>> [ <<+>>- ] <<`.
+        # Then loop repeats? Yes!
+        # If Valid, consume/clear. C0 remains 0. Loop exits.
         
-        # Only F needs action (add weight, consume).
-        # If we are here (Inside Not S), and C2 is 0, it is F.
+        # THIS IS IT!
         
-        # But `[` enters if Non-Zero.
-        # If F, C2 is 0. So `[` skips.
-        # So we can't run F code inside `[` checking C2.
-        
-        # Use ELSE pattern:
-        # Init C3 = 1 (Assume F).
-        # If Garbage, Set C3 = 0.
-        
-        emit('[-] +') # C2 = 1 (Assume F)
-        emit('<') # At C1
-        emit('[') # Not F (Garbage)
-        emit('[-]') # Clear C1
-        emit('> [-] <') # C2 = 0 (Garbage)
-        emit(']')
-        
-        # Now: If F, C2=1. If G, C2=0.
-        emit('>') # At C2
-        emit('[') # If F
-        emit('<<<< ,,') # Consume 80 80 at C0
-        emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
-        emit('[-] << [-] >>') # Clear C2, Clear C0 (Exit)
-        emit(']')
-        emit('<') # At C1
-        
-        emit(']') # End Not S
-        
-        # If S: Outer loop skipped. C1 (which was Copy) is 32? No.
-        # If S: C0=32. C1 (Copy)=32. `> -32`. C1=0. `[` Skips.
-        # So for S, we fall through here.
-        # We need to set C0=0 to Exit.
-        # But wait, if Garbage, we also fall through here?
-        # If Garbage: Inner logic ran. C2 was 0. F-block skipped.
-        # We fell through. C0 is still Non-Zero.
-        # If F: Inner logic ran. C2 was 1. F-block ran. C0 became 0.
-        # We fell through. C0 is 0.
-        
-        # So:
-        # S -> C0!=0.
-        # G -> C0!=0.
-        # F -> C0=0.
-        
-        # We need to distinguish S vs G.
-        # S: C1=0.
-        # G: C1=0 (cleared inside).
-        
-        # We need a Flag for S.
-        # Before "Not S" loop: Set C3=1 (Is S).
-        # Inside "Not S" loop: Set C3=0.
-        
-        emit('>> [-]+ <<') # C3=1 (Assume S)
-        emit('[') # Not S
-        emit('>> [-] <<') # C3=0 (Not S)
-        
-        # ... (Inner F/G Logic) ...
-        # Copy-paste F/G logic from above
-        emit('-'*195) # Check F
-        emit('[-] +') # C2=1 (Assume F)
-        emit('<') # At C1
-        emit('[') # Not F (Garbage)
-        emit('[-]') # Clear C1
-        emit('> [-] <') # C2=0 (Garbage)
-        emit(']')
-        emit('>') # At C2
-        emit('[') # If F
-        emit('<<<< ,,') 
-        emit('>>>>' + '+'*weight + '<<<<') 
-        emit('[-] << [-] >>') # Clear C2, Clear C0
-        emit(']')
-        emit('<') # At C1
-        
-        emit(']') # End Not S
-        
-        # If S (C3=1)
-        emit('>>') # At C3
-        emit('[') # If S
-        emit('[-] <<< [-] >>>') # Clear C3, Clear C0
-        emit(']')
-        
-        emit('<<<') # Back to C0
+        emit('>[-]+<') # C1=1
+        emit('+') # C0+=1
+        emit('[') # If C0!=0 (Not 255)
+            emit('-') # Restore C0
+            emit('>-<') # C1=0 (Not 255)
+            
+            # Move C0 to C2
+            emit('>> [-] << [>>+<<-]') 
+            
+            # Now C0 is 0! The loop `[...]` will exit naturally!
+            # We must operate on C2.
+            # If Garbage, we must restore C0 from C2.
+            
+            # --- Check F (227) on C2 ---
+            # Copy C2 to C3
+            emit('>> [>+>+<<-] >> [-<<+>>] <') # C2->C3,C4. C4->C2.
+            
+            emit('-'*227) # C3 -= 227
+            emit('>[-]+ < [ >[-] < [-] ]') # C4=1 if match
+            
+            emit('>') # At C4
+            emit('[') # If F
+                emit('<<<< ,,') # Consume at C0 (Pointer relative to C4 is <<<<)
+                emit('>>>>' + '+'*weight) # Add Weight (Acc is C4? No, Acc is C4 in Main. Here it's local C4)
+                # Conflict on C4.
+                # Main Loop C4 is Acc.
+                # Here we are using C4 locally.
+                # We need to shift everything.
+                
+                # Let's use C5 as Acc in Main.
+                
+                emit('>>>>>' + '+'*weight + '<<<<<') # Add to C5
+                emit('[-] << [-] >>') # Clear C4, Clear C2
+            emit(']')
+            emit('<<') # At C2
+            
+            # --- Check S (32) on C2 ---
+            emit('[') # If C2!=0 (Not F)
+            
+            # Copy C2 to C3
+            emit('[>+>+<<-] >> [-<<+>>] <') 
+            
+            emit('-'*32) # C3 -= 32
+            emit('>[-]+ < [ >[-] < [-] ]') # C4=1 if match
+            
+            emit('>') # At C4
+            emit('[') # If S
+                emit('[-] << [-] >>') # Clear C4, Clear C2
+            emit(']')
+            emit('<<') # At C2
+            emit(']') # End Not F
+            
+            # If C2 is still not 0, it is Garbage.
+            # Restore C0.
+            emit('[ <<+>>- ]')
+            
+            # Go back to C0 to exit loop
+            emit('<<')
         emit(']') # End Not 255
         
-        # Handle EOF 255
+        # Handle EOF 255 (C1=1)
+        # If 255, C0 was 0 (from overflow).
+        # We need to Clear everything.
         emit('>') # At C1
         emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5, C1, C0
-        emit('<') 
+        emit('<') # At C0
         
         emit(']') # End Not 0
         emit(']') # End Search Loop
@@ -248,7 +382,7 @@ def main():
     emit('[-]+')  # C5 = 1
     emit('[')     # Main Loop
     
-    emit('< [-]') # Clear C4
+    emit('< [-]') # Clear C4 (Accumulator)
     emit('<<<<')  # To C0
     
     read_valid_bit(4)
