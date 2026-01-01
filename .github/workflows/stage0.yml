@@ -17,12 +17,15 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (debug)
+      - name: Generate Compiler
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_spaces_compiler.py --debug > spaces/self/spaces_compiler.spaces 2> bf_debug.log
+          # 失敗してもログを出すために || で繋ぐ
+          python3 tools/gen_spaces_compiler.py --debug > spaces/self/spaces_compiler.spaces 2> bf_debug.log || (cat bf_debug.log && exit 1)
+          
           echo "=== BF debug head ==="
-          head -n 1 bf_debug.log
+          head -n 5 bf_debug.log
+
       - name: Prepare Spaces Source
         run: |
           # 1. ASCIIソース作成
