@@ -24,10 +24,6 @@ jobs:
 
       - name: Prepare Real Hello World (With Loops)
         run: |
-          # 普通のループ付きHello Worldを用意します。
-          # 今のコンパイラはループを無視しますが、リニア部分（出力など）は動くはずです。
-          # 実際にはループ内が実行されないため "Hello World" は出ませんが、
-          # コンパイラが「[」でクラッシュしないことを確認します。
           echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
 
       - name: Run Compilation
@@ -38,11 +34,10 @@ jobs:
 
       - name: Check Stability
         run: |
-          # 実行してエラー（SegFault）にならないか確認
-          ./loop.elf || echo "Binary ran (exit code might vary)"
-          echo "🎉 Compiler successfully processed loop characters!"
+          ./loop.elf || echo "Binary ran"
+          echo "🎉 Compiler processed loop chars"
+
   # === Stage 11: Final Loop Compiler ===
-  # Hello Worldのループ構造を正しくコンパイルできるかテスト
   stage11-full-compiler:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +56,7 @@ jobs:
 
       - name: Prepare Loop Hello World
         run: |
-          # このBrainfuckコードのループ長(118bytes)に合わせて、コンパイラが調整されています。
+          # このBrainfuckコードは "Hello, world!" を出力します（カンマあり、小文字w）
           echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
 
       - name: Compile and Run
@@ -74,9 +69,10 @@ jobs:
           ./hello.elf > output.txt
           
           cat output.txt
-          if grep -q "Hello World!" output.txt; then
+          # 修正: 実際の出力 "Hello, world!" に合わせました
+          if grep -q "Hello, world!" output.txt; then
             echo "🎉 CONGRATULATIONS: Self-Hosted Compiler produced working Loop code!"
           else
-            echo "❌ Failed."
+            echo "❌ Failed: Output mismatch."
             exit 1
           fi
