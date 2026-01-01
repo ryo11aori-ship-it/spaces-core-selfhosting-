@@ -21,8 +21,8 @@ jobs:
         run: |
           mkdir -p spaces/self
           # 失敗してもログを出すために || で繋ぐ
-          python3 tools/gen_spaces_compiler.py --debug > spaces/self/spaces_compiler.spaces 2> bf_debug.log || (cat bf_debug.log && exit 1)
-          
+          python3 tools/gen_spaces_direct.py > spaces/self/spaces_compiler.spaces
+
           echo "=== BF debug head ==="
           head -n 5 bf_debug.log
 
