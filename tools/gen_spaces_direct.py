@@ -1,114 +1,121 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Unrolled Mode)
-#
-# Strategy:
-# 1. Construct the exact byte sequence of the target ELF binary in Python.
-# 2. Generate linear Spaces code (no loops) to output these bytes one by one.
-# 3. This guarantees termination (no infinite loops possible).
-# 4. No indentation logic needed, eliminating syntax errors.
+# Fix: Dynamic calculation of offsets and sizes to prevent "off-by-N" errors.
+#      No loops in Spaces code -> Guaranteed termination.
 
 import sys
+import struct
+
+def p64(val):
+    return list(val.to_bytes(8, 'little'))
+
+def p32(val):
+    return list(val.to_bytes(4, 'little'))
 
 def main():
-    # --- 1. Construct the Target ELF Binary (in memory) ---
+    # --- 1. Prepare Content ---
     
-    # Constants
-    # Entry point: 0x400000 + 0x78 (header size) = 0x400078
-    # Msg address: 0x400000 + 0x78 + 0x27 (code size) = 0x40009F
+    # Message
+    msg = [0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a] # "Hello, world!\n"
     
-    # ELF Header (64-bit Linux) - 120 bytes
-    elf_header = [
-        0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0, # Ident
-        0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00, # Type, Machine, Version
-        0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, # Entry (0x400078)
-        0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Phoff (64)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Shoff (0)
-        0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x38, 0x00, # Flags, Ehsize, Phentsize
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Phnum, Shentsize...
-        
-        # Program Header (Offset 64)
-        0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, # Type(LOAD), Flags(RWE)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Offset (0)
-        0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, # Vaddr (0x400000)
-        0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, # Paddr
-        0xAD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Filesz (173 bytes)
-        0xAD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # Memsz  (173 bytes)
-        0x00, 16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00    # Align (0x1000)
+    # Header size is fixed (64-bit ELF header + 1 Program Header)
+    # ELF Header (64) + Program Header (56) = 120 bytes
+    header_len = 120
+    
+    # --- 2. Construct Code with Placeholder Address ---
+    # We don't know msg_addr yet, but we can determine code length.
+    
+    # Machine Code Template
+    # mov eax, 1; mov edi, 1; mov rsi, 0x????????????????; mov edx, 14; syscall; mov eax, 60; xor edi, edi; syscall
+    # We use a placeholder for RSI
+    code_part1 = [
+        0xb8, 0x01, 0x00, 0x00, 0x00,       # mov eax, 1
+        0xbf, 0x01, 0x00, 0x00, 0x00,       # mov edi, 1
+        0x48, 0xbe                          # mov rsi, ...
     ]
-
-    # Machine Code (39 bytes)
-    # Prints "Hello, world!\n" and exits.
-    # Msg Addr calculation: 0x400000 + 120 (header) + 39 (code) = 0x40009F
-    msg_addr = 0x40009F
-    addr_bytes = [(msg_addr >> (8*i)) & 0xFF for i in range(4)] # 32-bit part is enough
+    # Placeholder for 64-bit address (8 bytes)
+    code_placeholder = [0x00] * 8
     
-    code = [
-        0xb8, 0x01, 0x00, 0x00, 0x00,       # mov eax, 1 (write)
-        0xbf, 0x01, 0x00, 0x00, 0x00,       # mov edi, 1 (stdout)
-        0x48, 0xbe] + addr_bytes + [0x00, 0x00, 0x00, 0x00, # mov rsi, msg_addr
-        0xba, 0x0e, 0x00, 0x00, 0x00,       # mov edx, 14 (len)
+    code_part2 = [
+        0xba, 0x0e, 0x00, 0x00, 0x00,       # mov edx, 14
         0x0f, 0x05,                         # syscall
-        0xb8, 0x3c, 0x00, 0x00, 0x00,       # mov eax, 60 (exit)
+        0xb8, 0x3c, 0x00, 0x00, 0x00,       # mov eax, 60
         0x31, 0xff,                         # xor edi, edi
         0x0f, 0x05                          # syscall
     ]
+    
+    # Temporary code just to get length
+    temp_code = code_part1 + code_placeholder + code_part2
+    code_len = len(temp_code)
+    
+    # --- 3. Calculate Addresses ---
+    load_addr = 0x400000
+    msg_offset = header_len + code_len
+    msg_addr = load_addr + msg_offset
+    
+    # --- 4. Finalize Code ---
+    # Put the correct address
+    final_code = code_part1 + p64(msg_addr) + code_part2
+    
+    # --- 5. Construct Header ---
+    total_size = header_len + code_len + len(msg)
+    
+    elf_header = [
+        0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
+        0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
+        # Entry point: Start of code (after header)
+        *p64(load_addr + header_len),
+        *p64(64), # Phoff
+        *p64(0),  # Shoff
+        *p32(0),  # Flags
+        0x40, 0x00, # Ehsize (64)
+        0x38, 0x00, # Phentsize (56)
+        0x01, 0x00, # Phnum
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00 # Shentsize, Shnum, Shstrndx
+    ]
+    
+    prog_header = [
+        0x01, 0x00, 0x00, 0x00, # Type LOAD
+        0x07, 0x00, 0x00, 0x00, # Flags RWE
+        *p64(0), # Offset
+        *p64(load_addr), # Vaddr
+        *p64(load_addr), # Paddr
+        *p64(total_size), # Filesz (Exact size)
+        *p64(total_size), # Memsz  (Exact size)
+        *p64(0x1000)      # Align
+    ]
+    
+    # --- 6. Assemble Binary ---
+    binary = elf_header + prog_header + final_code + msg
+    
+    # Check size match
+    if len(binary) != total_size:
+        # Should not happen with dynamic calc, but good safety
+        raise ValueError(f"Size mismatch: Calc {total_size} vs Actual {len(binary)}")
 
-    # Message (14 bytes)
-    msg = [0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a]
-
-    # Full Binary
-    binary = elf_header + code + msg
-    
-    # Calculate exact total size for p_filesz/p_memsz
-    total_size = len(binary) # Should be 120 + 39 + 14 = 173 (0xAD)
-    
-    # Update Filesz/Memsz in header (indexes 84 and 92)
-    # We hardcoded 0xAD above, so it matches.
-    
-    # --- 2. Generate Spaces Code ---
+    # --- 7. Generate Spaces Code ---
+    # Unrolled: Output bytes one by one using minimal Spaces ops
     S = " "      # Space
     F = "\u3000" # Fullwidth Space
-    
     cmds = []
     
-    # Helper to generate sequences
-    def emit_s(s): cmds.append(s)
-    
     current_val = 0
-    
-    # For each byte in the binary
     for byte in binary:
-        # Calculate difference from current cell value
         diff = byte - current_val
-        
-        # Optimize: 
-        # If diff is large, maybe reset to 0 (if we had a loop [-]) or use new cell (>).
-        # Since we have NO loops, we can't easily reset to 0 efficiently without knowing the value.
-        # But we track `current_val` in Python! So we know exactly how many + or - needed.
-        
         if diff > 0:
-            emit_s((S+F+S) * diff) # +
+            cmds.append((S+F+S) * diff) # +
         elif diff < 0:
-            emit_s((S+F+F) * (-diff)) # -
-            
-        emit_s(F+S+S) # . (Output)
-        
+            cmds.append((S+F+F) * (-diff)) # -
+        cmds.append(F+S+S) # .
         current_val = byte
         
-        # Strategy choice:
-        # A) Update current cell to next value (minimal diff).
-        # B) Move to next cell (>) which is 0.
-        # Method A produces smaller code if values are close.
-        # Method B guarantees 0 start but adds > overhead.
-        # Let's stick to Method A (Reuse cell) as it handles runs of similar bytes well.
-    
-    # --- 3. Output ---
+    # Output to stdout
     sys.stdout.buffer.write("".join(cmds).encode('utf-8'))
     
-    # CI Dummy Log
+    # Log
     with open("bf_debug.log", "w") as f:
-        f.write(f"Generated Unrolled Spaces Code. Binary Size: {total_size} bytes.\n")
+        f.write(f"Generated Unrolled. Size: {total_size}. MsgAddr: {hex(msg_addr)}\n")
 
 if __name__ == '__main__':
     main()
