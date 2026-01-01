@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Direct Mode)
-# Fix: REMOVED ALL VISUAL INDENTATION to prevent Python IndentationError.
+# Fix: Fixed infinite loop by implementing robust Token Reader (Skip garbage/newline).
 
 import sys
 
@@ -48,7 +48,8 @@ def main():
     # 1. Safety Margin
     right(8)
 
-    # 2. ELF Header (64-bit Linux) - 131KB Memory
+    # 2. ELF Header (64-bit Linux)
+    # Filesize: 0x200 (512), Memsize: 0x20000 (131KB)
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -60,7 +61,7 @@ def main():
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     ]
@@ -71,68 +72,134 @@ def main():
     for b in init_code: emit_byte(b)
 
     # 4. COMPILER LOGIC
-    # Helper to read one Spaces Token (S or F)
+    # C0: Input Char
+    # C1: Temp / Copy
+    # C2: Search Loop Flag
+    # C3: Check Flag
+    # C4: EOF Flag
+    # C5: Token Result (0=S, 1=F)
+    # C6: Opcode Acc
+
     def read_token():
-        # Clear EOF Flag (C4)
-        right(4); clear(); left(4)
-        # Set Outer Loop Flag (C2=1)
-        right(2); inc(); loop_start()
+        # Reset Flags
+        right(4); clear(); left(4) # Clear EOF Flag C4
+        right(5); clear(); left(5) # Clear Token Result C5
+        
+        # Start Search Loop (C2 = 1)
+        right(2); clear(); inc(); loop_start()
         
         # Read Char to C0
         left(2); clear(); inp()
         
-        # Check EOF (0)
-        loop_start() 
+        # --- Check EOF (0) ---
+        # Logic: C3=1. If C0!=0 then C3=0.
+        right(3); clear(); inc(); left(3) # C3=1
         
-        # Check 255 (Real EOF)
-        right(3); clear(); inc(); left(3)
-        inc()
-        loop_start(); dec(); right(3); dec(); left(3); loop_end()
+        # Copy C0->C1 to check non-zero
+        right(); clear(); left()
+        loop_start(); right(); inc(); left(); dec(); loop_end() # Move C0->C1
+        right(); loop_start(); left(); inc(); right(); dec(); loop_end(); left() # Restore C0 from C1
         
-        # If C3 is 1 (EOF), Set C4=1 and Break
-        right(3); loop_start()
-        clear()
-        right(); inc(); left()
-        left(3); clear()
-        right(); dec(); left()
-        right(3)
-        loop_end(); left(3)
-        
-        # Check S (32)
-        right(3); clear(); inc(); left(3)
-        right(5); clear(); left(5)
-        
-        # Subtract 32
-        dec(32)
-        loop_start() 
-        clear(); right(3); clear(); left(3)
-        
-        # Check F (227-32 = 195)
-        dec(195)
+        # If C1 (Copy of C0) is non-zero, set C3=0
+        right()
         loop_start()
-        clear()
+            right(2); dec(); left(2) # C3=0
+            clear() # Clear C1
         loop_end()
+        left()
         
-        # If F (Not S/Garbage), Set C5=1, Consume 2 bytes
-        right(5); inc(); left(5)
-        inp(); inp()
-        
-        # Break Outer Loop
-        right(2); dec(); left(2) 
-        loop_end()
-        
-        # If C3 is still 1 (It was S)
+        # If C3 is 1 (EOF), Handle Exit
         right(3)
         loop_start()
-        clear()
-        left(); dec(); right()
+            # Set EOF Flag C4=1
+            right(); inc(); left()
+            # Break Search Loop C2=0
+            left(); dec(); right()
+            # Clear C3
+            clear()
         loop_end()
         left(3)
         
-        # End EOF Check (0)
-        loop_end() 
+        # --- If Not EOF (C2 is still 1), Check Chars ---
+        left() # Go to C2
+        loop_start() # If C2==1
+            left(2) # Go to C0
+            
+            # Check S (32)
+            # Copy C0->C1
+            right(); clear(); left()
+            loop_start(); right(); inc(); left(); dec(); loop_end()
+            right(); loop_start(); left(); inc(); right(); dec(); loop_end()
+            
+            # C1 -= 32
+            right(); dec(32)
+            
+            # Check if C1 == 0
+            # Set C3=1. If C1!=0, C3=0.
+            right(2); clear(); inc(); left(2) # C3=1
+            loop_start(); right(2); dec(); left(2); clear(); loop_end() # If C1!=0, C3=0, Clear C1
+            
+            # If C3==1 (It was S)
+            right(2)
+            loop_start()
+                 # Found S! C5 is already 0.
+                 # Break Search Loop C2=0
+                 left(); dec(); right()
+                 clear() # Clear C3
+            loop_end()
+            left(2)
+            
+            # If C2 is still 1 (Not S), Check F (227)
+            # We must re-check C0 (it is preserved).
+            # But wait, we can just check if C0 == 227.
+            
+            # Go to C2
+            left() # C1
+            loop_start() # If C2==1 (Not S yet)
+                left() # C0
+                
+                # Copy C0->C1
+                right(); clear(); left()
+                loop_start(); right(); inc(); left(); dec(); loop_end()
+                right(); loop_start(); left(); inc(); right(); dec(); loop_end()
+                
+                # C1 -= 227
+                right(); dec(227)
+                
+                # Check if C1 == 0
+                right(2); clear(); inc(); left(2) # C3=1
+                loop_start(); right(2); dec(); left(2); clear(); loop_end()
+                
+                # If C3==1 (It was F)
+                right(2)
+                loop_start()
+                    # Found F! Set C5=1
+                    right(2); inc(); left(2)
+                    # Consume 2 bytes
+                    left(3); inp(); inp(); right(3)
+                    # Break Search Loop C2=0
+                    left(); dec(); right()
+                    clear()
+                loop_end()
+                left(2)
+                
+                # If C2 is still 1 (Not S, Not F) -> Garbage (Newline etc)
+                # Just Loop again (C2 is still 1)
+                
+                # Break inner wrapper C1
+                left()
+                clear() # Clear C1 (Dummy)
+                right()
+            loop_end()
+            
+            # Break inner wrapper C2
+            left() # C1
+            clear() # Clear C1 (Dummy)
+            right()
+        loop_end()
+        left(2) # Back to C0
         
-        # End Outer Loop (C2)
+        # End Search Loop (C2)
         right(2)
         loop_end()
         left(2)
