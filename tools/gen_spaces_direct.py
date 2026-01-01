@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Direct Mode)
-# Fix: Corrected ELF Header structure offsets to prevent Exec format error (126).
-#      e_shoff was missing 8 bytes of zeros, shifting subsequent fields.
+# Fix: Corrected memory address calculation for "Hello World" string.
+#      Previous version pointed to 0x100 instead of 0x400100.
 
 import sys
 
@@ -41,38 +41,21 @@ def main():
     right(8)
 
     # 2. ELF Header (64-bit Linux)
-    # Corrected Layout:
+    # Filesize: 512 bytes (0x200), Memsize: 4096 bytes (0x1000)
     header = [
-        # 1. Ident (16 bytes)
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
-        # 2. Type(2), Machine(2), Version(4)
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
-        # 3. Entry(8) -> 0x400078
         0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # 4. Phoff(8) -> 0x40 (64)
         0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # 5. Shoff(8) -> 0 (Missing in previous version!)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # 6. Flags(4), Ehsize(2), Phentsize(2)
         0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x38, 0x00,
-        # 7. Phnum(2), Shentsize(2), Shnum(2), Shstrndx(2)
         0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        
-        # Program Header (Starts at 64)
-        # Type(4)=LOAD, Flags(4)=RWE
         0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
-        # Offset(8)
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Vaddr(8)
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Paddr(8)
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Filesz(8) = 0x200 (512)
         0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Memsz(8) = 0x1000 (4096)
-        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Align(8) = 0x1000
-        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        0x00, 10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     ]
     for b in header: emit_byte(b)
     current_offset = len(header)
@@ -83,45 +66,40 @@ def main():
     current_offset += len(init_code)
 
     # 4. Input Consumption Loop
-    # C0=1 (Start Loop)
+    # Read and discard input
     clear(); inc(); loop_start()
-    
-    # Read Char
     inp()
-    
     # Check 255 (EOF) logic
-    # Copy C0 to C1
     right(); clear(); left()
     loop_start(); right(); inc(); left(); dec(); loop_end()
     right(); loop_start(); left(); inc(); right(); dec(); loop_end()
-    
-    # C1 += 1. If C1==0 (overflow), it was 255.
     right(); inc()
     loop_start()
-    # If C1!=0, it wasn't 255. Clear C1.
     clear()
     loop_end()
-    
-    # If C1 is still 1 (because loop skipped), it was 255.
-    # If C1==1, Clear C0 to break outer loop.
     loop_start()
     left(); clear(); right() # Clear C0
     clear() # Clear C1
     loop_end()
-    
-    left() # Back to C0
-    
-    # Loop check (C0)
+    left()
     loop_end()
 
     # 5. Emit Fixed "Hello World" Machine Code
+    # Msg Address: 0x400100
+    # Correct Little Endian encoding: 00 01 40 00 00 00 00 00
     msg_addr = 0x400100
-    # mov rsi, 0x400100
-    rsi_bytes = [0x48, 0xbe, (msg_addr & 0xFF), ((msg_addr >> 8) & 0xFF), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    addr_bytes = [
+        (msg_addr >> 0) & 0xFF,
+        (msg_addr >> 8) & 0xFF,
+        (msg_addr >> 16) & 0xFF,
+        (msg_addr >> 24) & 0xFF,
+        0x00, 0x00, 0x00, 0x00
+    ]
     
     code = [
         0xb8, 0x01, 0x00, 0x00, 0x00,       # mov eax, 1
-        0xbf, 0x01, 0x00, 0x00, 0x00] + rsi_bytes + [
+        0xbf, 0x01, 0x00, 0x00, 0x00,       # mov edi, 1
+        0x48, 0xbe] + addr_bytes + [        # mov rsi, 0x400100
         0xba, 0x0e, 0x00, 0x00, 0x00,       # mov edx, 14
         0x0f, 0x05,                         # syscall
         0xb8, 0x3c, 0x00, 0x00, 0x00,       # mov eax, 60
