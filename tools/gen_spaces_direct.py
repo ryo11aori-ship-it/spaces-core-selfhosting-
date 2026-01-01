@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Direct Mode)
-# Fix: REMOVED ALL INDENTATION LOGIC to prevent Python errors.
-# Fix: ADDED SAFETY COUNTERS to force-exit infinite loops (Max 256 instructions).
-# Fix: Reduced file size to 4KB for instant padding.
+# Features:
+# 1. SAFETY TIMER: Hard limit on main loop (approx 65k cycles).
+#    Forces exit even if infinite loop occurs.
+# 2. Strict Flat Indentation: No Python errors.
+# 3. Fixed File Size: 4KB ELF.
 
 import sys
 
@@ -30,17 +32,18 @@ def clear():
     loop_end()
 
 # --- TRACKED OUTPUT SYSTEM ---
-# C7: Low Byte Counter, C8: High Byte Counter
+# C7: Low Byte Counter (Output Size)
+# C8: High Byte Counter (Output Size)
 # C0: Working Cursor
 
 def emit_byte_tracked(val):
     # Output byte
     right(9); clear(); inc(val); out(); clear(); left(9)
-    # Increment Counter (C7)
+    # Increment Counter C7
     right(7); inc()
     # Check Overflow C7 (256->0)
     right(2); clear(); left(2); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
-    # If C9==0, increment C8. Use C1 as flag.
+    # If C9==0, increment C8.
     left(9); right(); clear(); inc(); right(8); loop_start(); left(8); clear(); right(8); clear(); loop_end()
     left(8); loop_start(); clear(); right(7); inc(); left(7); loop_end()
     left() # Back to C0
@@ -50,12 +53,11 @@ def emit_machine_code_tracked(bytes_list):
         emit_byte_tracked(b)
 
 def main():
-    # 1. Safety Margin (Using up to C15)
+    # 1. Safety Margin
     right(16)
 
     # 2. ELF Header (64-bit Linux)
-    # Filesz: 0x1000 (4096 bytes)
-    # Memsz: 0x20000 (131072 bytes)
+    # Filesz: 4KB, Memsz: 131KB
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -79,23 +81,15 @@ def main():
     for b in init_code: emit_byte_tracked(b)
 
     # 4. COMPILER LOGIC
-    # C14: Main Instruction Safety Counter
-    # C15: Token Search Safety Counter
+    # C14: Safety Timer Low (Start at 255)
+    # C15: Safety Timer High (Start at 255) -> Total ~65000 loops max
     
-    # Helper to read token: Reads until S, F, or EOF found.
-    # Checks C15 limit.
     def emit_read_token_logic():
         right(4); clear(); left(4) # Clear EOF
         right(5); clear(); left(5) # Clear Result
         right(2); clear(); inc(); loop_start(); left(2) # Start C2 Loop
         
-        # SAFETY CHECK C15
-        right(15); inc()
-        # If C15 wrapped (was 255), force break.
-        right(2); clear(); left(2); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
-        left(17); right(); clear(); inc(); right(16); loop_start(); left(17); clear(); right(17); clear(); loop_end()
-        left(17); loop_start(); clear(); left(13); dec(); right(13); loop_end(); left() # If Limit, Set C4=1 (EOF), Break C2
-        
+        # Simple Read & Check
         inp() # Read C0
         
         # Check EOF(0)
@@ -117,17 +111,30 @@ def main():
 
     # 5. MAIN LOOP
     right(6); clear(); left(6)
-    right(14); clear(); left(14)
-    right(2); clear(); inc(); loop_start(); left(2) # Infinite Main Loop
     
-    # SAFETY CHECK C14 (Total Instructions)
-    right(14); inc()
-    right(2); clear(); left(2); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
-    left(16); right(); clear(); inc(); right(15); loop_start(); left(16); clear(); right(16); clear(); loop_end()
-    left(16); loop_start(); clear(); left(14); dec(); right(14); loop_end(); left(2) # If Limit, Break C2
+    # Initialize Safety Timer
+    right(14); clear(); dec(); right(); clear(); dec(); left(15) # C14=255, C15=255
+    
+    right(2); clear(); inc(); loop_start(); left(2) # Main Loop
+    
+    # --- SAFETY CHECK ---
+    # Dec C14. If 0, Dec C15. If C15 0, Break.
+    right(14); dec()
+    right(2); clear(); left(2); right(14); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(14); loop_start(); left(2); inc(); right(2); dec(); loop_end(); left(14)
+    # Check if C14 was 0 (now C16 copy is 0)
+    # Use C9 scratch
+    left(5); right(); clear(); inc(); right(14); loop_start(); left(15); clear(); right(15); clear(); loop_end()
+    left(15); loop_start(); clear() # If C14 wrapped
+    right(15); dec() # Dec High Byte
+    right(2); clear(); left(2); right(15); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(15); loop_start(); left(2); inc(); right(2); dec(); loop_end(); left(15)
+    left(6); right(); clear(); inc(); right(15); loop_start(); left(16); clear(); right(16); clear(); loop_end()
+    left(16); loop_start(); clear(); left(14); dec(); right(14); loop_end(); left(2) # Break Main Loop
+    left(13) # Back to C1
+    loop_end()
+    left(9) # Back to C0
+    # --- END SAFETY CHECK ---
     
     right(6); clear(); left(6)
-    
     emit_read_token_logic()
     right(4); loop_start(); clear(); left(2); dec(); right(2); loop_end(); left(4)
     right(5); loop_start(); dec(); right(); inc(4); left(); loop_end(); left(5)
@@ -140,20 +147,14 @@ def main():
     right(4); loop_start(); clear(); left(2); dec(); right(2); loop_end(); left(4)
     right(5); loop_start(); dec(); right(); inc(1); left(); loop_end(); left(5)
     
-    # Message Address: 0x400E00 (Near end of 4KB)
-    msg_addr = 0x400E00
+    # Message Address: 0x400200
+    msg_addr = 0x400200
     addr_bytes = [(msg_addr >> (8*i)) & 0xFF for i in range(8)]
     
     right(6); inc()
-    loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    dec(); loop_start() 
-    clear()
+    loop_start(); dec(); loop_start(); dec(); loop_start(); dec(); loop_start()
+    dec(); loop_start(); dec(); loop_start(); dec(); loop_start(); dec(); loop_start()
+    dec(); loop_start(); clear()
     loop_end(); emit_machine_code_tracked([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff])
     loop_end(); emit_machine_code_tracked([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x84, 0x76, 0x00, 0x00, 0x00])
     loop_end()
@@ -163,19 +164,16 @@ def main():
     loop_end(); emit_machine_code_tracked([0x49, 0xff, 0xcd])
     loop_end(); emit_machine_code_tracked([0x49, 0xff, 0xc5])
     left(6)
-    
     right(2); loop_end(); left(2)
 
-    # 6. PADDING to 0xE00 (3584 bytes) for Message
-    # Target C8 == 14 (0x0E)
-    right(8); dec(14); loop_start(); inc(14); left(8); emit_byte_tracked(0); right(8); dec(14); loop_end(); inc(14); left(8)
+    # 6. PADDING PHASE 1: Pad until 0x200 (512)
+    right(8); dec(2); loop_start(); inc(2); left(8); emit_byte_tracked(0); right(8); dec(2); loop_end(); inc(2); left(8)
 
     # 7. EMIT MESSAGE
     msg = [0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a]
     for b in msg: emit_byte_tracked(b)
 
-    # 8. PADDING to 0x1000 (4096 bytes)
-    # Target C8 == 16 (0x10)
+    # 8. PADDING PHASE 2: Pad until 0x1000 (4096)
     right(8); dec(16); loop_start(); inc(16); left(8); emit_byte_tracked(0); right(8); dec(16); loop_end(); inc(16); left(8)
 
     sys.stdout.buffer.write("".join(CMDS).encode('utf-8'))
