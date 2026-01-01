@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_direct.py
 # Spaces Compiler Generator (Direct Mode)
-# Fix: Corrected Python IndentationError.
-#      Ensures ELF binary is padded to exactly 32KB (0x8000) to match headers.
+# Fix: Corrected IndentationError.
+#      Ensures ELF binary is padded to exactly 32KB (0x8000).
+#      Implements robust parser to skip garbage characters without infinite loops.
 
 import sys
 
@@ -29,37 +30,68 @@ def clear():
     loop_end()
 
 # --- TRACKED OUTPUT SYSTEM ---
-# C7: Low Byte Counter, C8: High Byte Counter, C9: Scratch
+# We track the number of bytes emitted to ensure alignment.
+# C7: Low Byte Counter
+# C8: High Byte Counter
+# C9: Scratch for overflow check
 # C0: Working Cursor
 
 def emit_byte_tracked(val):
-    # 1. Output byte
-    right(9); clear(); inc(val); out(); clear(); left(9)
+    # 1. Output the byte
+    right(9)
+    clear()
+    inc(val)
+    out()
+    clear()
+    left(9)
     
     # 2. Increment Counter (C7/C8)
-    right(7); inc()
+    right(7)
+    inc()
     
-    # Check for overflow (256 -> 0) using C9
-    right(2); clear(); left(2) # Clear C9
+    # Check for overflow (256 -> 0)
+    # Use C9 to check if C7 became 0
+    right(2)
+    clear()
+    left(2)
+    
     # Copy C7 to C9
-    loop_start(); right(2); inc(); left(2); dec(); loop_end()
-    right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
+    loop_start()
+    right(2)
+    inc()
+    left(2)
+    dec()
+    loop_end()
     
-    # If C9 is 0, it was overflow (C7 wrapped to 0)
-    # Logic: Set C1=1. If C9!=0, Set C1=0.
-    left(9) # At C0. C1 is scratch.
-    right(); clear(); inc() # C1=1
+    right(2)
+    loop_start()
+    left(2)
+    inc()
+    right(2)
+    dec()
+    loop_end()
+    
+    # If C9 is 0, then C7 was 0 (Overflow occurred).
+    # Logic: Set C1 (Scratch) = 1. If C9!=0, Set C1=0.
+    left(9) # Back to C0. C1 is scratch.
+    right()
+    clear()
+    inc() # C1=1
     right(8) # At C9
     
     loop_start() # If C9!=0
-    left(8); clear() # C1=0
-    right(8); clear() # Clear C9
+    left(8)
+    clear() # C1=0
+    right(8)
+    clear() # Clear C9
     loop_end()
     
     left(8) # At C1
-    loop_start() # If C1==1 (Overflow happened)
+    loop_start() # If C1==1 (Overflow confirmed)
     clear()
-    right(7); inc(); left(7) # Increment C8
+    right(7)
+    inc() # Increment C8 (High Byte)
+    left(7)
     loop_end()
     
     left() # Back to C0
@@ -101,39 +133,59 @@ def main():
     for b in init_code: emit_byte_tracked(b)
 
     # 4. COMPILER LOGIC
+    # C0: Input
+    # C1: Scratch
+    # C2: Loop Flag (1=Run, 0=Stop)
+    # C3: Check Flag
+    # C4: EOF Flag
+    # C5: Token Result
+    # C6: Acc
+
     def emit_read_token_logic():
-        right(4); clear(); left(4)
-        right(5); clear(); left(5)
+        right(4); clear(); left(4) # Clear C4
+        right(5); clear(); left(5) # Clear C5
+        
+        # Start Loop C2=1
         right(2); clear(); inc(); loop_start(); left(2)
         
         inp() # Read C0
         
         # Check EOF(0)
         right(3); clear(); left(3)
+        # Copy C0->C3
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+        # If C0 was 0, C3 is 0. If C0!=0, C3!=0.
+        # We need Flag=1 if C0=0.
         right(); inc(); right(2); clear(); inc(); left(2); dec()
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
+        # If C3 was 0 (EOF), C1 is 1.
         right(2); loop_start(); clear(); right(); inc(); left(2); dec(); right(); loop_end(); left(3)
         
         # Check S(32)
-        right(2); loop_start(); left(2)
+        right(2); loop_start(); left(2) # If C2
         right(3); clear(); left(3)
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-        right(); dec(32); right(2); clear(); inc(); left(2)
+        right(); dec(32)
+        right(2); clear(); inc(); left(2)
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
+        # If C1==0 (Match), Set C3=1
         right(2); loop_start(); clear(); left(); dec(); right(); loop_end(); left(3)
         right(2); loop_end(); left(2)
         
         # Check F(227)
-        right(2); loop_start(); left(2)
+        right(2); loop_start(); left(2) # If C2
         right(3); clear(); left(3)
         loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
         right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-        right(); dec(227); right(2); clear(); inc(); left(2)
+        right(); dec(227)
+        right(2); clear(); inc(); left(2)
         loop_start(); right(2); clear(); left(2); clear(); loop_end()
-        right(2); loop_start(); clear(); right(2); inc(); left(2); left(3); inp(); inp(); right(3); left(); dec(); right(); loop_end(); left(3)
+        # If C1==0 (Match)
+        right(2); loop_start()
+        clear(); right(2); inc(); left(2); left(3); inp(); inp(); right(3); left(); dec(); right()
+        loop_end(); left(3)
         right(2); loop_end(); left(2)
         
         # Loop End C2
@@ -175,13 +227,20 @@ def main():
     left(6)
     right(2); loop_end(); left(2)
 
-    # 6. PADDING PHASE 1: Pad until 16KB (0x4000) for Message
-    # Target C8 == 64
-    right(8); dec(64)
+    # 6. PADDING PHASE 1: Pad until 16KB (0x4000 = 64 * 256)
+    # C8 is High Byte Counter. We want C8 == 64.
+    
+    right(8)
+    dec(64)
     loop_start()
-    inc(64); left(8); emit_byte_tracked(0); right(8); dec(64)
+    inc(64)
+    left(8)
+    emit_byte_tracked(0)
+    right(8)
+    dec(64)
     loop_end()
-    inc(64); left(8)
+    inc(64)
+    left(8)
 
     # 7. EMIT MESSAGE
     msg = [
@@ -190,13 +249,20 @@ def main():
     ]
     for b in msg: emit_byte_tracked(b)
 
-    # 8. PADDING PHASE 2: Pad until 32KB (0x8000)
-    # Target C8 == 128
-    right(8); dec(128)
+    # 8. PADDING PHASE 2: Pad until 32KB (0x8000 = 128 * 256)
+    # We want C8 == 128.
+    
+    right(8)
+    dec(128)
     loop_start()
-    inc(128); left(8); emit_byte_tracked(0); right(8); dec(128)
+    inc(128)
+    left(8)
+    emit_byte_tracked(0)
+    right(8)
+    dec(128)
     loop_end()
-    inc(128); left(8)
+    inc(128)
+    left(8)
 
     # Output
     sys.stdout.buffer.write("".join(CMDS).encode('utf-8'))
