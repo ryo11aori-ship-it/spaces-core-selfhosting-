@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # === Stage 12: Spaces Native Compiler ===
-  # Spaces言語で書かれたコンパイラが、Spaces言語のソースコードを読んでコンパイルする。
-  stage12-spaces-compiler:
+  stage12-diagnosis:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,35 +17,39 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (Spaces Parser)
+      - name: Generate Compiler
         run: |
           mkdir -p spaces/self
           python3 tools/gen_spaces_compiler.py > spaces/self/spaces_compiler.spaces
 
       - name: Prepare Spaces Source
         run: |
-          # 1. まずASCIIのHello World (ループ版) を用意
+          # 1. ASCIIソース作成
           echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
           
-          # 2. generator.py で Spaces言語 (S/F) に変換
-          # (generator.py がリポジトリにある前提。なければ即席で作る必要がありますが、過去の経緯からあると判断)
-          if [ ! -f tools/generator.py ]; then
-            echo "Error: tools/generator.py not found!"
-            exit 1
-          fi
+          # 2. Spaces変換
           python3 tools/generator.py hello.bf > hello.spaces
 
-      - name: Compile and Run (Native Spaces)
+          # 【診断1】入力ファイルの中身を確認
+          echo "=== DIAGNOSIS: hello.spaces (First 64 bytes) ==="
+          ls -l hello.spaces
+          od -t x1 hello.spaces | head -n 4
+          echo "================================================"
+
+      - name: Compile (Spaces -> ELF)
         run: |
           echo "Compiling hello.spaces..."
-          # 入力: hello.spaces (Spaces言語)
-          # コンパイラ: spaces_compiler.spaces (Spaces言語)
-          # VM: ref_vm
           ./bin/ref_vm spaces/self/spaces_compiler.spaces < hello.spaces > hello_spaces.elf
-          
           chmod +x hello_spaces.elf
-          ls -l hello_spaces.elf
           
+          # 【診断2】出力ファイルの中身を確認（コードが生成されているか？）
+          echo "=== DIAGNOSIS: hello_spaces.elf (First 256 bytes) ==="
+          ls -l hello_spaces.elf
+          od -t x1 hello_spaces.elf | head -n 16
+          echo "====================================================="
+
+      - name: Run Generated Binary
+        run: |
           echo "Running..."
           ./hello_spaces.elf > output.txt
           cat output.txt
@@ -59,12 +61,11 @@ jobs:
             exit 1
           fi
 
-      # 成果物として .spaces ファイルを保存（空白コードを読んでいる証拠）
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stage12-spaces-files
+          name: stage12-files
           path: |
-            spaces/self/spaces_compiler.spaces
             hello.spaces
             hello_spaces.elf
+            output.txt
