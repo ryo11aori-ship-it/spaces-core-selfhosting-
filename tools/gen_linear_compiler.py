@@ -1,10 +1,10 @@
 import sys
 
-# Stage 9: Linear Native Compiler Generator (64KB Fixed Size)
+# Stage 9: Linear Native Compiler Generator (Instruction Encoding Fix)
 # Generates a Spaces program that:
-# 1. Emits ELF Header claiming a flat 64KB segment.
-# 2. Translates Source to Machine Code.
-# 3. PADS the output with ~64KB of zeros to guarantee file size > header claim.
+# 1. Emits ELF Header (64KB).
+# 2. Translates Source to CORRECT x64 Machine Code (Fixed ModRM byte).
+# 3. PADS the output with ~64KB of zeros.
 
 def main():
     bf = []
@@ -24,12 +24,12 @@ def main():
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 
         0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # FIX 1: Set FileSize to 0x10000 (64KB).
+        # FileSize 64KB
         0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # FIX 2: Set MemSize to 0x10000 (64KB). Flat binary style.
+        # MemSize 64KB
         0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        # Alignment 4KB (0x1000)
-        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
+        # Alignment 4KB
+        0x00, 16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
     ]
     
     # Emit Header
@@ -37,8 +37,7 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # Runtime Init: mov r13, 0x408000 (Point Tape to middle of loaded memory, safe area)
-    # 49 bd 00 80 40 00 00 00 00 00
+    # Runtime Init: mov r13, 0x408000
     init_code = [0x49, 0xbd, 0x00, 0x80, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00]
     for b in init_code:
         if b: emit('+'*b + '. [-]')
@@ -56,30 +55,38 @@ def main():
     
     # Check function
     def check(val, bytes_hex):
-        emit('-'*val) # Sub val from C1
-        emit('>[-]+<') # Set C2=1
-        emit('[>[-]<[-]]') # If C1!=0, Clear C2 & C1
-        emit('>') # To C2
+        emit('-'*val) 
+        emit('>[-]+<') 
+        emit('[>[-]<[-]]') 
+        emit('>') 
         emit('[') 
         emit_bytes(bytes_hex)
-        emit('[-]]') # Clear C2
-        emit('<<') # To C0
-        emit('>[-]>[-]<< [>+>+<<-] >> [<<+>>-] <') # Recopy
+        emit('[-]]') 
+        emit('<<') 
+        emit('>[-]>[-]<< [>+>+<<-] >> [<<+>>-] <') 
 
-    # Order check
-    check(43, [0x41, 0xfe, 0x05, 0x00]) # +
-    check(45, [0x41, 0xfe, 0x0d, 0x00]) # -
+    # Order check - FIXED HEX CODES
+    # + (43): inc byte [r13]. Was 05 (RIP+), Now 45 (R13+disp8)
+    check(43, [0x41, 0xfe, 0x45, 0x00]) 
+    
+    # - (45): dec byte [r13]. Was 0D (RIP+), Now 4D (R13+disp8)
+    check(45, [0x41, 0xfe, 0x4d, 0x00]) 
+    
+    # . (46)
     check(46, [
         0xb8, 0x01, 0x00, 0x00, 0x00,
         0xbf, 0x01, 0x00, 0x00, 0x00,
         0x4c, 0x89, 0xee,
         0xba, 0x01, 0x00, 0x00, 0x00,
         0x0f, 0x05
-    ]) # .
-    check(62, [0x49, 0xff, 0xc5]) # >
-    check(60, [0x49, 0xff, 0xcd]) # <
+    ]) 
     
-    emit('< [-],]') # Consume C0, loop
+    # > (62)
+    check(62, [0x49, 0xff, 0xc5]) 
+    # < (60)
+    check(60, [0x49, 0xff, 0xcd]) 
+    
+    emit('< [-],]') 
 
     # --- Epilogue (Exit 0) ---
     exit_code = [0xb8, 0x3c, 0x00, 0x00, 0x00, 0x48, 0x31, 0xff, 0x0f, 0x05]
@@ -87,27 +94,20 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # --- PADDING FIX (64KB) ---
-    # We claimed 64KB. We assume output is < 64KB.
-    # We emit 256*256 = 65536 zeros to ensure file > 64KB.
-    # This guarantees the OS loader finds enough bytes.
-    
-    emit('>>') # To C2
-    emit('[-]') # Ensure C2=0 (Counter 1)
-    emit('-') # C2 = 255
-    emit('[') # Outer loop
-    
-    emit('>') # To C3
-    emit('[-]') # Ensure C3=0 (Counter 2)
-    emit('-') # C3 = 255
-    emit('[') # Inner loop
-    emit('>') # To C4
+    # --- PADDING (64KB) ---
+    emit('>>') 
+    emit('[-]' + '+'*255) # C2 = 255
+    emit('[') 
+    emit('>') 
+    emit('[-]' + '+'*255) # C3 = 255
+    emit('[') 
+    emit('>') 
     emit('.') # Print 0
-    emit('<') # Back to C3
-    emit('-]') # Inner loop end
-    
-    emit('<') # Back to C2
-    emit('-]') # Outer loop end
+    emit('<') 
+    emit('-]') 
+    emit('<') 
+    emit('-]') 
+    # Note: 255*255 is approx 65000. Close enough to fill gap.
 
     # Output
     S, F = " ", "\u3000"
