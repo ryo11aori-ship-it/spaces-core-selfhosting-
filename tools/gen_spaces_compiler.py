@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Pointer Logic Fixed)
+# Stage 12: Spaces Native Compiler (Pointer & EOF Fix)
 # Reads Spaces Source Code.
-# Fixes the bug where S/F checks were looking at the wrong memory cells.
+# Fixes Pointer Misalignment (C2->C4) and EOF Loop.
 
 def main():
     bf = []
@@ -38,62 +38,45 @@ def main():
         emit('[-]+[') # Start Search Loop
         emit(',')     # Read C0
         
-        # --- Check EOF (0) ---
-        emit('[') # If C0!=0
-        
-        # --- Check EOF (255) ---
-        emit('>[-]+< + [ - >-<') # Check 255. Result in C1 (0=255, 1=Not 255)
-        
-        # --- Check F (227) ---
-        # Copy C0 to C1 and C2, Restore C0 from C2. End at C1.
-        emit('>[-]') # Clear C1
-        emit('< [>+>+<<-]') # C0 -> C1, C2
-        emit('>> [-<<+>>] <') # C2 -> C0. End at C1.
-        
-        emit('-'*227) # Subtract 227 from C1
-        
-        # Check if C1 is 0. Set C2=1 if Match.
-        emit('>[-]+') # Set C2=1
-        emit('< [ >[-] < [-] ]') # If C1!=0, Clear C2, Clear C1.
-        
-        # If Match (C2=1)
-        emit('>') # To C2
+        # Check EOF (0)
         emit('[') 
-        emit('<< ,,') # Consume 80 80 at C0
-        emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
-        emit('[-]') # Clear C0 to Exit Loop
-        emit('>> [-]') # Clear C2
+        
+        # Check EOF (255)
+        emit('>[-]+< + [ - >-<') 
+        
+        # Check F (227)
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
+        emit('>>' + '-'*227) 
+        emit('>[-]+< [>[-]<[-]]') 
+        
+        emit('>>> [') # If F (At C3)
+        emit('<<< ,,') # Consume 80 80 at C0
+        # FIX: C3 -> C4 is 1 step (>>> is C3).
+        # We are at C3. C4 is >.
+        emit('>' + '+'*weight + '<') # Add Weight to C4
+        emit('[-] <<< [-] >>>') # Clear C3, C0 -> Exit
         emit(']') 
-        emit('<<') # Back to C0
         
-        # --- Check S (32) ---
-        emit('[') # If C0!=0 (Not F)
+        # Check S (32)
+        emit('<<<') 
+        emit('[') 
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
+        emit('>>' + '-'*32) 
+        emit('>[-]+< [>[-]<[-]]') 
         
-        # Copy C0 to C1...
-        emit('>[-]< [>+>+<<-] >> [-<<+>>] <') # End at C1
-        
-        emit('-'*32) # Subtract 32
-        
-        # Check Match
-        emit('>[-]+ < [ >[-] < [-] ]') # C2=1 if Match
-        
-        emit('>') # To C2
-        emit('[')
-        # Weight 0 (Do nothing)
-        emit('<< [-]') # Clear C0 to Exit Loop
-        emit('>> [-]') # Clear C2
+        emit('>>> [') # If S (At C3)
+        emit('[-] <<< [-] >>>') # Clear C3, C0 -> Exit
         emit(']')
-        emit('<<') # Back to C0
-        
+        emit('<<<') 
         emit(']') # End Not F
         
-        emit('>>') # To C2
+        emit('>>') 
         emit(']') # End Not 255
         
         # Handle EOF 255 (C1=1)
         emit('>') # To C1
         emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5, C1, C0
-        emit('<') # To C0
+        emit('<') 
         
         emit(']') # End Not 0
         emit(']') # End Search Loop
