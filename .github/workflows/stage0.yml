@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage10-compiler-prep:
+  # === Stage 12: Spaces Native Compiler ===
+  # Spaces言語で書かれたコンパイラが、Spaces言語のソースコードを読んでコンパイルする。
+  stage12-spaces-compiler:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,62 +19,52 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (Loop Aware)
+      - name: Generate Compiler (Spaces Parser)
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_loop_compiler.py > spaces/self/loop_compiler.spaces
+          python3 tools/gen_spaces_compiler.py > spaces/self/spaces_compiler.spaces
 
-      - name: Prepare Real Hello World (With Loops)
+      - name: Prepare Spaces Source
         run: |
+          # 1. まずASCIIのHello World (ループ版) を用意
           echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
-
-      - name: Run Compilation
-        run: |
-          ./bin/ref_vm spaces/self/loop_compiler.spaces < hello.bf > loop.elf
-          chmod +x loop.elf
-          ls -l loop.elf
-
-      - name: Check Stability
-        run: |
-          ./loop.elf || echo "Binary ran"
-          echo "🎉 Compiler processed loop chars"
-
-  # === Stage 11: Final Loop Compiler ===
-  stage11-full-compiler:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build VM
-        run: |
-          mkdir -p bin
-          gcc src/ref/vm.c -o bin/ref_vm
-          chmod +x bin/ref_vm
-
-      - name: Generate Compiler
-        run: |
-          mkdir -p spaces/self
-          python3 tools/gen_full_compiler.py > spaces/self/full_compiler.spaces
-
-      - name: Prepare Loop Hello World
-        run: |
-          # このBrainfuckコードは "Hello, world!" を出力します（カンマあり、小文字w）
-          echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
-
-      - name: Compile and Run
-        run: |
-          echo "Compiling..."
-          ./bin/ref_vm spaces/self/full_compiler.spaces < hello.bf > hello.elf
-          chmod +x hello.elf
           
-          echo "Running..."
-          ./hello.elf > output.txt
-          
-          cat output.txt
-          # 修正: 実際の出力 "Hello, world!" に合わせました
-          if grep -q "Hello, world!" output.txt; then
-            echo "🎉 CONGRATULATIONS: Self-Hosted Compiler produced working Loop code!"
-          else
-            echo "❌ Failed: Output mismatch."
+          # 2. generator.py で Spaces言語 (S/F) に変換
+          # (generator.py がリポジトリにある前提。なければ即席で作る必要がありますが、過去の経緯からあると判断)
+          if [ ! -f tools/generator.py ]; then
+            echo "Error: tools/generator.py not found!"
             exit 1
           fi
+          python3 tools/generator.py hello.bf > hello.spaces
+
+      - name: Compile and Run (Native Spaces)
+        run: |
+          echo "Compiling hello.spaces..."
+          # 入力: hello.spaces (Spaces言語)
+          # コンパイラ: spaces_compiler.spaces (Spaces言語)
+          # VM: ref_vm
+          ./bin/ref_vm spaces/self/spaces_compiler.spaces < hello.spaces > hello_spaces.elf
+          
+          chmod +x hello_spaces.elf
+          ls -l hello_spaces.elf
+          
+          echo "Running..."
+          ./hello_spaces.elf > output.txt
+          cat output.txt
+          
+          if grep -q "Hello, world!" output.txt; then
+            echo "🎉 SUCCESS: Spaces Compiler compiled Spaces Code!"
+          else
+            echo "❌ Failed."
+            exit 1
+          fi
+
+      # 成果物として .spaces ファイルを保存（空白コードを読んでいる証拠）
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage12-spaces-files
+          path: |
+            spaces/self/spaces_compiler.spaces
+            hello.spaces
+            hello_spaces.elf
