@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Indentation Fixed)
-# Reads Spaces Source Code (S/F sequences), Outputs ELF.
-# Ignores garbage characters to prevent infinite loops.
+# Stage 12: Spaces Native Compiler (EOF Fix + Indentation Check)
+# Reads Spaces Source Code.
+# Fixes infinite loop on EOF by explicitly checking for 0.
 
 def main():
     bf = []
@@ -33,42 +33,28 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # --- Helper: Read 1 Bit (Robust) ---
+    # --- Helper: Read Bits 2 and 3 (Robust) ---
     def read_bit_robust(weight):
-        # We start at C0.
-        emit('[-]') 
-        emit('+[') # Start Loop
-        emit(',') # Read C0
+        emit('[-]+[') # Start Loop C0=1
+        emit(',') # Read
         
         # Check F (227)
         emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
         emit('>' + '-'*227) 
         emit('>[-]+< [>[-]<[-]]') 
-        
-        emit('>[') 
-        emit(',,') 
-        emit('>' + '+'*weight + '<') 
-        emit('<< [-] >>') 
-        emit('[-]') 
-        emit(']') 
+        emit('>[ ,, >' + '+'*weight + '< <<[-]>> [-] ]') 
         
         # Check S (32)
-        emit('<<') 
-        emit('[') 
+        emit('<< [') 
         emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
         emit('>' + '-'*32)
         emit('>[-]+< [>[-]<[-]]') 
-        
-        emit('>[') 
-        emit('<< [-] >>') 
-        emit('[-]')
-        emit(']') 
-        
-        emit('<<') 
+        emit('>[ <<[-]>> [-] ]') 
+        emit('<< ]') 
         emit(']') 
 
     # --- Decoder Logic ---
-    # C0: Input, C3: Opcode, C5: Flag
+    # C0: Input, C1: EOF Check, C3: Opcode, C5: Loop Flag
     
     emit('>>>>>') # To C5
     emit('[-]+')  # C5 = 1
@@ -76,61 +62,107 @@ def main():
     emit('<< [-]') # Clear C3
     emit('<<<')    # To C0
     
-    read_bit_robust(4)
-    read_bit_robust(2)
-    read_bit_robust(1)
+    emit(',') # Read First Char of Triplet
     
-    emit('>>>') # To C3
+    # EOF Check Logic:
+    emit('>') # To C1
+    emit('[-]+') # C1 = 1 (Assume EOF)
+    emit('<') # To C0
     
-    def emit_bytes(bs):
-        for b in bs: emit('>' + '+'*b + '. [-] <')
+    emit('[') # If C0 != 0 (Not EOF)
+        emit('>-<') # C1 = 0 (Not EOF)
+        
+        # --- Inline Robust Logic for Bit 1 (Weight 4) ---
+        # We already have C0. Loop until S/F found.
+        emit('[') 
+        # Check F
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
+        emit('>' + '-'*227) 
+        emit('>[-]+< [>[-]<[-]]') 
+        emit('>[ ,, >++++< <<[-]>> [-] ]') 
+        
+        # Check S
+        emit('<< [') 
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
+        emit('>' + '-'*32)
+        emit('>[-]+< [>[-]<[-]]') 
+        emit('>[ <<[-]>> [-] ]') 
+        
+        # If Garbage, read next
+        emit('<< ,') 
+        emit(']') # End Check S
+        emit('<<') # Back to C0
+        emit(']') # End Robust Loop Bit 1
+        
+        # --- Read Bits 2 & 3 ---
+        read_bit_robust(2)
+        read_bit_robust(1)
+        
+        # --- Emit Opcode ---
+        emit('>>>') # To C3
+        
+        def emit_bytes(bs):
+            for b in bs: emit('>' + '+'*b + '. [-] <')
 
-    # Case 0: >
-    emit('>[-]+< [>[-]<[-]] > [') 
-    emit_bytes([0x49, 0xff, 0xc5]) 
-    emit('[-]] <')
+        # Case 0: >
+        emit('>[-]+< [>[-]<[-]] > [') 
+        emit_bytes([0x49, 0xff, 0xc5]) 
+        emit('[-]] <')
 
-    # Case 1: <
-    emit('-') 
-    emit('>[-]+< [>[-]<[-]] > [') 
-    emit_bytes([0x49, 0xff, 0xcd]) 
-    emit('[-]] <')
+        # Case 1: <
+        emit('-') 
+        emit('>[-]+< [>[-]<[-]] > [') 
+        emit_bytes([0x49, 0xff, 0xcd]) 
+        emit('[-]] <')
 
-    # Case 2: +
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [')
-    emit_bytes([0x41, 0xfe, 0x45, 0x00]) 
-    emit('[-]] <')
+        # Case 2: +
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [')
+        emit_bytes([0x41, 0xfe, 0x45, 0x00]) 
+        emit('[-]] <')
 
-    # Case 3: -
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [')
-    emit_bytes([0x41, 0xfe, 0x4d, 0x00]) 
-    emit('[-]] <')
+        # Case 3: -
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [')
+        emit_bytes([0x41, 0xfe, 0x4d, 0x00]) 
+        emit('[-]] <')
 
-    # Case 4: .
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [')
-    emit_bytes([0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xee, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05])
-    emit('[-]] <')
+        # Case 4: .
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [')
+        emit_bytes([0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x4c, 0x89, 0xee, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05])
+        emit('[-]] <')
 
-    # Case 5: ,
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [ [-]] <')
+        # Case 5: ,
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [ [-]] <')
 
-    # Case 6: [
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [')
-    emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x84, 0x76, 0x00, 0x00, 0x00]) 
-    emit('[-]] <')
+        # Case 6: [
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [')
+        emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x84, 0x76, 0x00, 0x00, 0x00]) 
+        emit('[-]] <')
 
-    # Case 7: ]
-    emit('-')
-    emit('>[-]+< [>[-]<[-]] > [')
-    emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff]) 
-    emit('[-]] <')
+        # Case 7: ]
+        emit('-')
+        emit('>[-]+< [>[-]<[-]] > [')
+        emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff]) 
+        emit('[-]] <')
+        
+        emit('<<<') # Back to C0
+        emit('[-]') # Clear C0 to exit IF
+    emit(']')
     
-    emit('>>') # To C5
+    # Handle EOF Flag
+    emit('>') # To C1
+    emit('[') # If C1 is 1 (EOF was True)
+        emit('>>>>') # To C5
+        emit('[-]')  # C5 = 0 (Stop Loop)
+        emit('<<<<') # To C1
+        emit('[-]')  # Clear C1
+    emit(']')
+    
+    emit('>>>>') # To C5
     emit(']')
 
     S, F = " ", "\u3000"
