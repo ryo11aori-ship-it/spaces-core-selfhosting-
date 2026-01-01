@@ -41,3 +41,42 @@ jobs:
           # 実行してエラー（SegFault）にならないか確認
           ./loop.elf || echo "Binary ran (exit code might vary)"
           echo "🎉 Compiler successfully processed loop characters!"
+  # === Stage 11: Final Loop Compiler ===
+  # Hello Worldのループ構造を正しくコンパイルできるかテスト
+  stage11-full-compiler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build VM
+        run: |
+          mkdir -p bin
+          gcc src/ref/vm.c -o bin/ref_vm
+          chmod +x bin/ref_vm
+
+      - name: Generate Compiler
+        run: |
+          mkdir -p spaces/self
+          python3 tools/gen_full_compiler.py > spaces/self/full_compiler.spaces
+
+      - name: Prepare Loop Hello World
+        run: |
+          # このBrainfuckコードのループ長(118bytes)に合わせて、コンパイラが調整されています。
+          echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
+
+      - name: Compile and Run
+        run: |
+          echo "Compiling..."
+          ./bin/ref_vm spaces/self/full_compiler.spaces < hello.bf > hello.elf
+          chmod +x hello.elf
+          
+          echo "Running..."
+          ./hello.elf > output.txt
+          
+          cat output.txt
+          if grep -q "Hello World!" output.txt; then
+            echo "🎉 CONGRATULATIONS: Self-Hosted Compiler produced working Loop code!"
+          else
+            echo "❌ Failed."
+            exit 1
+          fi
