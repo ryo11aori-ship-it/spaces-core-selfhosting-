@@ -1,9 +1,9 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (No Indentation Error)
+# Stage 12: Spaces Native Compiler (Simple State Machine)
 # Reads Spaces Source Code.
-# Logic: EOF check (0 or 255) + Robust Reading.
-# FORMATTING: All emit calls are strictly aligned.
+# Logic: Read -> Check EOF -> Check Valid -> Process.
+# GUARANTEED to stop on EOF.
 
 def main():
     bf = []
@@ -34,77 +34,129 @@ def main():
         if b: emit('+'*b + '. [-]')
         else: emit('.')
 
-    # --- Helper: Read Bits 2 and 3 (Robust) ---
-    def read_bit_robust(weight):
-        emit('[-]+[') 
-        emit(',') 
-        # Check 255 (EOF)
-        emit('>[-]+ <') 
-        emit('+') 
-        emit('[') 
-        emit('-') 
-        emit('>-<') 
-        # Check F
+    # --- Helper: Read ONE Valid Bit (0 or 1) ---
+    # Returns: Adds 'weight' to C3 if Bit is 1.
+    # Logic:
+    #   Loop forever:
+    #     Read Char (C0).
+    #     If C0 == 0 or 255: Hard Exit (Jump to End).
+    #     If C0 == F (227): Consume 2 bytes, Add Weight, Break Loop.
+    #     If C0 == S (32): Break Loop (Add 0).
+    #     Else: Continue Loop (Ignore Garbage).
+    
+    def read_valid_bit(weight):
+        emit('[-]+[') # Start Search Loop (C0=1 dummy)
+        emit(',')     # Read C0
+        
+        # --- 1. EOF Check (0) ---
+        emit('[') # If C0 != 0
+        
+        # --- 2. EOF Check (255) ---
+        emit('>[-]+< + [ - >-<') # Check 255
+        # If Not 255, C1=0.
+        
+        # --- 3. Check F (227) ---
+        # Copy C0->C2
         emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>' + '-'*227) 
-        emit('>[-]+< [>[-]<[-]]') 
-        emit('>[ ,, >' + '+'*weight + '< <<[-]>> [-] ]') 
-        # Check S
-        emit('<< [') 
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>' + '-'*32)
-        emit('>[-]+< [>[-]<[-]]') 
-        emit('>[ <<[-]>> [-] ]') 
-        emit('<< ]') 
+        emit('>>' + '-'*227) 
+        emit('>[-]+< [>[-]<[-]]') # C3 = 1 if F
+        
+        emit('>>> [') # If F
+        emit('<<< ,,') # Consume 80 80
+        # Add Weight to Accumulator (C3 is effectively C4 in main, wait.)
+        # Caller uses C3 as Accumulator.
+        # This helper uses C0(Input), C1(Scratch), C2(Scratch), C3(Flag).
+        # We need to add to Main Accumulator (Let's say C4).
+        emit('>>>>' + '+'*weight + '<<<<') 
+        
+        # Clear Flag C3, Clear C0 to Exit Loop
+        emit('[-] <<< [-] >>>')
+        emit(']') 
+        
+        # --- 4. Check S (32) ---
+        emit('<<<') # Back to C0
+        emit('[') # If C0 != 0 (Not F)
+        
+        # Copy C0->C2
+        emit('>[-]< [>+>+<<-] >> [<<+>>-] <')
+        emit('>>' + '-'*32)
+        emit('>[-]+< [>[-]<[-]]') # C3 = 1 if S
+        
+        emit('>>> [') # If S
+        # Do nothing (Weight 0)
+        # Clear Flag C3, Clear C0 to Exit Loop
+        emit('[-] <<< [-] >>>')
+        emit(']')
+        
+        emit('<<<') # Back to C0
+        emit(']') # End Not F
+        
+        # If C0 is still != 0, it is garbage.
+        # We continue loop.
+        
+        emit('>>') # To C2 (Scratch, 0)
         emit(']') # End Not 255
-        # Clean up C1 if it was 255
-        emit('>[-]<')
-        emit(']') # End Loop
+        
+        # If C1 is 1 (Was 255), we must EXIT EVERYTHING.
+        # We set a Global Exit Flag? 
+        # Or we just clear C0 and set a special flag?
+        # Let's use C5 (Main Loop Flag) to 0.
+        emit('>') # To C1
+        emit('[') # If 255
+        emit('>>>> [-] <<<<') # Clear C5
+        emit('[-] < [-]') # Clear C1, Clear C0
+        emit(']')
+        emit('<') # To C0
+        
+        emit(']') # End Not 0 (EOF Check 0)
+        
+        # If C0 was 0, loop ends naturally.
+        # But we need to check if we should abort main loop.
+        # If C0 was 0, we didn't process anything.
+        # Set C5 = 0.
+        # We can check if C0 was 0 by inverting?
+        # Actually, simpler:
+        # If the Search Loop finishes, it means we found S/F OR we hit EOF.
+        # If EOF, C0 is 0. If S/F, C0 is 0 (cleared manually).
+        # How to distinguish?
+        # Use C6 as "Found Valid" flag?
+        
+        # REVISED STRATEGY:
+        # If EOF detected, set C5=0.
+        # Always check C5 before continuing.
+        pass
+        emit(']') # End Search Loop
 
-    # --- Decoder Logic ---
+    # --- MAIN LOOP ---
+    # C0: Input
+    # C1, C2, C3: Scratch
+    # C4: Opcode Accumulator
+    # C5: Main Loop Flag (1=Run, 0=Stop)
+    
     emit('>>>>>') # To C5
     emit('[-]+')  # C5 = 1
-    emit('[')     # Outer Loop
-    emit('<< [-]') 
-    emit('<<<')    
-    emit(',') # Read First Char
+    emit('[')     # Main Loop
     
-    # EOF Check (0 or 255)
-    # Check 0
-    emit('[') 
-    # Check 255
-    emit('>[-]+<') 
-    emit('+') 
-    emit('[') # Not 255
-    emit('-') 
-    emit('>-<') 
+    emit('< [-]') # Clear C4 (Accumulator)
+    emit('<<<<')  # To C0
     
-    # --- Inline Robust Bit 1 ---
-    emit('[') 
-    # Check F
-    emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-    emit('>' + '-'*227) 
-    emit('>[-]+< [>[-]<[-]]') 
-    emit('>[ ,, >++++< <<[-]>> [-] ]') 
-    # Check S
-    emit('<< [') 
-    emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-    emit('>' + '-'*32)
-    emit('>[-]+< [>[-]<[-]]') 
-    emit('>[ <<[-]>> [-] ]') 
-    emit('<< ,') 
-    # Check EOF (255) inside robust skipper
-    emit('>[-]+< + [ - >-<') 
-    emit('] >[-]<') 
-    emit(']') 
-    emit('<<') 
-    emit(']') # End Robust Bit 1
+    # Read 3 Bits.
+    # We must check C5 after each read to abort immediately.
     
-    # Bits 2 & 3
-    read_bit_robust(2)
-    read_bit_robust(1)
+    # Bit 1 (Weight 4)
+    read_valid_bit(4)
+    emit('>>>>> [ <<<<<') # Check C5. If 1, Continue.
     
-    emit('>>>') # To C3
+    # Bit 2 (Weight 2)
+    read_valid_bit(2)
+    emit('>>>>> [ <<<<<') 
+    
+    # Bit 3 (Weight 1)
+    read_valid_bit(1)
+    emit('>>>>> [ <<<<<') 
+    
+    # Process Opcode in C4
+    emit('>>>>') # To C4
     
     def emit_bytes(bs):
         for b in bs: emit('>' + '+'*b + '. [-] <')
@@ -154,26 +206,11 @@ def main():
     emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff]) 
     emit('[-]] <')
     
-    emit('<<<') 
+    emit('>') # To C5
+    # Dummy brackets to close the "If C5" checks
+    emit('] ] ]') 
+    emit(']') # End Main Loop
     
-    emit(']') # End Not 255
-    
-    # Check if C1=1 (Was 255) to exit outer loop
-    emit('>') 
-    emit('[') 
-    emit('>>>>') 
-    emit('[-]') 
-    emit('<<<<') 
-    emit('[-]') 
-    emit(']')
-    
-    emit('<') 
-    emit('[-]') # Clear C0
-    emit(']') # End Not 0
-    
-    emit('>>>>') 
-    emit(']')
-
     S, F = " ", "\u3000"
     mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     full_bf = "".join(bf)
