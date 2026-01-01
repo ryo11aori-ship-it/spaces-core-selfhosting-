@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_spaces_compiler.py
-# Fix: Removed illegal indentation in Python code.
-#      Logic remains exactly the same.
+# Fix: Add safety margin to tape to prevent Underflow.
+#      Fix Logic Error in S-Check flag setting.
+#      Correct indentation to prevent Python errors.
 
 import sys
 import argparse
@@ -14,6 +15,10 @@ def build_bf(debug=False):
         cleaned = "".join(c for c in s if c in BF_CHARS)
         if cleaned:
             bf.append(cleaned)
+
+    # --- Safety Margin ---
+    # Shift everything right by 8 cells to prevent Underflow at C0
+    emit('>' * 8)
 
     # --- ELF Header ---
     header = [
@@ -52,9 +57,9 @@ def build_bf(debug=False):
         # Check EOF 255
         emit('>[-]+< + [ - >-< ]')
         
-        # If C1=1 (EOF), Clear Main Flag (C5) and Exit
-        emit('>') # At C1
-        emit('[ >>>>[-]<<<< [-]<[-] ]') 
+        # If C1=1 (EOF), Exit All
+        emit('>') # C1
+        emit('[ >>>>>[-]<<<<< [-]<[-] ]') 
         emit('<') # Back to C0
         
         # Clear Flags C2, C3, Temp C4
@@ -65,10 +70,10 @@ def build_bf(debug=False):
         emit('[ >+ >>>+ <<<< -] >>>> [- <<<<+>>>> ] <<<<')
         
         # Check S (32) on C1
-        emit('>[-]+<')      # C2=1 (Assume S)
+        emit('>>[-]+<<')    # C2=1 (Assume S). FIXED: Use >>/<< to reach C2.
         emit('>' + '-'*32)  # To C1. C1 -= 32
         emit('[')           # If C1!=0 (Not S)
-        emit('[-] > [-] <') # Clear C1, Clear C2
+        emit('[-] > [-] <') # Clear C1, Clear C2. Back at C1.
         
         # Check F (227). Recopy C0 -> C1
         emit('< [ >+ >>>+ <<<< -] >>>> [- <<<<+>>>> ] <<<<')
@@ -80,9 +85,9 @@ def build_bf(debug=False):
         emit(']') # End Not S logic
         
         # If Flags C2(S) or C3(F) set, Clear C0 to Exit Loop
-        emit('>') # To C2
+        emit('>') # To C2 (From C1)
         emit('[ << [-] >> - + ]') # If C2, Clear C0
-        emit('>') # To C3
+        emit('>') # To C3 (From C2)
         emit('[ <<< [-] >>> - + ]') # If C3, Clear C0
         
         emit('<<<') # Back to C0
@@ -92,11 +97,11 @@ def build_bf(debug=False):
         emit(']') # End Search Loop
         
         # --- ACTION ---
-        # If F (C3=1), Add Weight to Acc (C6)
+        # If F (C3=1)
         emit('>>>') # To C3
         emit('[')
         emit('[-] <<< ,,') # Clear C3, Consume 2 bytes at C0
-        emit('>>>>>>' + '+' * weight + '<<<<<<') # Add to C6
+        emit('>>>>>' + '+' * weight + '<<<<<') # Add to C5
         emit('>>>') # Back to C3 (now 0)
         emit(']')
         
@@ -106,51 +111,52 @@ def build_bf(debug=False):
         emit('<<') # Back to C0
 
     # --- MAIN LOOP ---
-    emit('>>>>>') # To C5 (Main Flag)
-    emit('[-]+')  # Set Main Flag = 1
+    emit('>>>>>>') # To C6
+    emit('[-]+')   # C6 = 1
     emit('[')
 
-    emit('>[-]<') # Clear C6 (Acc)
-    emit('<<<<<') # To C0
+    emit('<[-]')   # Clear C5 (Acc)
+    emit('<<<<<')  # To C0
 
     read_valid_bit(4)
-    emit('>>>>>[<<<<<') # Check C5 (Main Flag)
+    emit('>>>>>>[<<<<<<') # Check C6
     read_valid_bit(2)
-    emit('>>>>>[<<<<<')
+    emit('>>>>>>[<<<<<<')
     read_valid_bit(1)
-    emit('>>>>>[<<<<<')
+    emit('>>>>>>[<<<<<<')
 
-    emit('>>>>>>') # To C6 (Opcode Acc)
+    emit('>>>>>') # To C5
 
     def emit_bytes(bs):
         for b in bs:
-            # Use C7 as scratch (>)
+            if not (0 <= b <= 0xFF):
+                raise ValueError(f"byte value out of range: {b}")
             emit('>' + '+' * b + '.[-]<')
 
-    # Case 0: > (3 bytes)
+    # Case 0: >
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x49, 0xff, 0xc5])
     emit('[-]]<')
 
-    # Case 1: < (3 bytes)
+    # Case 1: <
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x49, 0xff, 0xcd])
     emit('[-]]<')
 
-    # Case 2: + (4 bytes)
+    # Case 2: +
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x41, 0xfe, 0x45, 0x00])
     emit('[-]]<')
 
-    # Case 3: - (4 bytes)
+    # Case 3: -
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x41, 0xfe, 0x4d, 0x00])
     emit('[-]]<')
 
-    # Case 4: . (20 bytes)
+    # Case 4: .
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([
@@ -160,27 +166,27 @@ def build_bf(debug=False):
     ])
     emit('[-]]<')
 
-    # Case 5: , (Input not implemented, strict loop)
+    # Case 5: ,
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[-]]<')
 
-    # Case 6: [ (11 bytes)
+    # Case 6: [
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x84, 0x76, 0x00, 0x00, 0x00])
     emit('[-]]<')
 
-    # Case 7: ] (11 bytes)
+    # Case 7: ]
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x41, 0x80, 0x7d, 0x00, 0x00, 0x0f, 0x85, 0x74, 0xff, 0xff, 0xff])
     emit('[-]]<')
 
-    emit('<') # To C5 (Main Flag)
+    emit('<') # To C5
     emit(']]]') # Close checks
     emit(']')   # End Main Loop
 
-    # Padding to 64KB
+    # Padding
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
 
