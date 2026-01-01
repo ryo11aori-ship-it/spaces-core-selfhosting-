@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Pointer Logic Strictly Fixed)
+# Stage 12: Spaces Native Compiler (Underflow Fix)
 # Reads Spaces Source Code.
-# Fixes pointer drift in read_valid_bit.
+# Fixes "Tape pointer underflow" by removing erroneous left shift.
 
 def main():
     bf = []
@@ -50,10 +50,9 @@ def main():
         emit('>-<') # C1=0
         
         # --- Check F (227) ---
-        # We are at C1 (which is 0). Go to C0.
-        emit('<') 
+        # We are at C0. (FIXED: Removed erroneous '<')
         
-        # Copy C0 to C2 and C3. Restore C0 from C3.
+        # Copy C0 to C2 and C3, Restore C0 from C3.
         # Temp Layout: C0(Input), C1(0), C2(Copy), C3(Copy)
         emit('>> [-] > [-] <<<') # Clear C2, C3. Back to C0.
         emit('[ >>+>+<<<- ]') # Move C0 -> C2, C3
@@ -69,14 +68,19 @@ def main():
         
         # If Match (C3=1)
         emit('>') # To C3
-        emit('[')
-        # Consume 80 80 at C0 (We are at C3)
-        emit('<<< ,,') 
-        # Add Weight to C4
-        emit('>>>>' + '+'*weight + '<<<<') 
-        # Clear C3 (Self), Clear C0 to Exit Loop
-        emit('[-] <<< [-] >>>')
-        emit(']')
+        emit('[') 
+        emit('<<< ,,') # Consume 80 80 at C0
+        emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
+        emit('[-] <<< [-]') # Clear C3, Clear C0 to Exit Loop
+        # NOTE: We must end at C0 or ensure pointer consistency.
+        # After `<<< [-]`, we are at C0.
+        # But we are inside `[` of C3.
+        # We need to return to C3 to close loop? No, C3 is 0.
+        # We need to effectively break.
+        # Loop ends when C3 is 0.
+        # But we are currently at C0.
+        emit('>>>') # Back to C3 to satisfy loop
+        emit(']') 
         emit('<<<') # Back to C0
         
         # --- Check S (32) ---
@@ -96,20 +100,18 @@ def main():
         emit('>') # To C3
         emit('[')
         # Weight 0
-        # Clear C3, Clear C0 to Exit Loop
-        emit('[-] <<< [-] >>>')
+        emit('[-] <<< [-]') # Clear C3, Clear C0
+        emit('>>>') # Back to C3
         emit(']')
         emit('<<<') # Back to C0
         
         emit(']') # End Not F
         
-        # Back to C1 check
-        emit('>') # To C1
         emit(']') # End Not 255
         
-        # If C1=1 (Was 255), Clear Everything to Exit
-        # We are at C1.
-        emit('[ >>>>[-]<<<< [-]<[-] ]') 
+        # Handle EOF 255 (C1=1)
+        emit('>') # To C1
+        emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5, C1, C0
         emit('<') # To C0
         
         emit(']') # End Not 0
