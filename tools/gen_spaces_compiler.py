@@ -1,8 +1,8 @@
 import sys
 
-# Stage 12: Spaces Native Compiler (Padding Boost + Strict Format)
+# Stage 12: Spaces Native Compiler (Pointer Logic Fixed)
 # Reads Spaces Source Code.
-# Updates: Increased padding to guarantee >64KB file size.
+# Fixes the bug where S/F checks were looking at the wrong memory cells.
 
 def main():
     bf = []
@@ -35,55 +35,76 @@ def main():
 
     # --- Helper: Read ONE Valid Bit ---
     def read_valid_bit(weight):
-        emit('[-]+[') 
-        emit(',') 
+        emit('[-]+[') # Start Search Loop
+        emit(',')     # Read C0
         
-        # Check EOF (0)
+        # --- Check EOF (0) ---
+        emit('[') # If C0!=0
+        
+        # --- Check EOF (255) ---
+        emit('>[-]+< + [ - >-<') # Check 255. Result in C1 (0=255, 1=Not 255)
+        
+        # --- Check F (227) ---
+        # Copy C0 to C1 and C2, Restore C0 from C2. End at C1.
+        emit('>[-]') # Clear C1
+        emit('< [>+>+<<-]') # C0 -> C1, C2
+        emit('>> [-<<+>>] <') # C2 -> C0. End at C1.
+        
+        emit('-'*227) # Subtract 227 from C1
+        
+        # Check if C1 is 0. Set C2=1 if Match.
+        emit('>[-]+') # Set C2=1
+        emit('< [ >[-] < [-] ]') # If C1!=0, Clear C2, Clear C1.
+        
+        # If Match (C2=1)
+        emit('>') # To C2
         emit('[') 
-        
-        # Check EOF (255)
-        emit('>[-]+< + [ - >-<') 
-        
-        # Check F (227)
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>>' + '-'*227) 
-        emit('>[-]+< [>[-]<[-]]') 
-        emit('>>> [') 
-        emit('<<< ,,') 
-        emit('>>>>' + '+'*weight + '<<<<') 
-        emit('[-] <<< [-] >>>') 
+        emit('<< ,,') # Consume 80 80 at C0
+        emit('>>>>' + '+'*weight + '<<<<') # Add Weight to C4
+        emit('[-]') # Clear C0 to Exit Loop
+        emit('>> [-]') # Clear C2
         emit(']') 
+        emit('<<') # Back to C0
         
-        # Check S (32)
-        emit('<<<') 
-        emit('[') 
-        emit('>[-]< [>+>+<<-] >> [<<+>>-] <') 
-        emit('>' + '-'*32) 
-        emit('>[-]+< [>[-]<[-]]') 
-        emit('>>> [') 
-        emit('[-] <<< [-] >>>') 
+        # --- Check S (32) ---
+        emit('[') # If C0!=0 (Not F)
+        
+        # Copy C0 to C1...
+        emit('>[-]< [>+>+<<-] >> [-<<+>>] <') # End at C1
+        
+        emit('-'*32) # Subtract 32
+        
+        # Check Match
+        emit('>[-]+ < [ >[-] < [-] ]') # C2=1 if Match
+        
+        emit('>') # To C2
+        emit('[')
+        # Weight 0 (Do nothing)
+        emit('<< [-]') # Clear C0 to Exit Loop
+        emit('>> [-]') # Clear C2
         emit(']')
-        emit('<<<') 
-        emit(']') 
+        emit('<<') # Back to C0
         
-        emit('>>') 
-        emit(']') 
+        emit(']') # End Not F
         
-        # Check C1=1 (Was 255)
-        emit('>') 
-        emit('[ >>>>[-]<<<< [-]<[-] ]') 
-        emit('<') 
+        emit('>>') # To C2
+        emit(']') # End Not 255
         
-        emit(']') 
-        emit(']') 
+        # Handle EOF 255 (C1=1)
+        emit('>') # To C1
+        emit('[ >>>>[-]<<<< [-]<[-] ]') # Clear C5, C1, C0
+        emit('<') # To C0
+        
+        emit(']') # End Not 0
+        emit(']') # End Search Loop
 
     # --- MAIN LOOP ---
-    emit('>>>>>') 
-    emit('[-]+')  
-    emit('[')     
+    emit('>>>>>') # To C5
+    emit('[-]+')  # C5 = 1
+    emit('[')     # Main Loop
     
-    emit('< [-]') 
-    emit('<<<<')  
+    emit('< [-]') # Clear C4 (Accumulator)
+    emit('<<<<')  # To C0
     
     # Read 3 Bits
     read_valid_bit(4)
@@ -148,9 +169,7 @@ def main():
     emit('] ] ]') 
     emit(']') # End Main Loop
     
-    # --- PADDING (Double Boost) ---
-    # Emit 255*255 zeros TWICE.
-    # Total 65025 * 2 = 130050 bytes. Guaranteed > 64KB.
+    # --- PADDING ---
     emit('>>[-]' + '+'*255 + '[>[-]' + '+'*255 + '[>.< -]<-]')
     emit('>>[-]' + '+'*255 + '[>[-]' + '+'*255 + '[>.< -]<-]')
 
