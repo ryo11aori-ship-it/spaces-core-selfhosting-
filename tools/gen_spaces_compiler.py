@@ -1,18 +1,17 @@
-# tools/gen_spaces_compiler.py (修正版)
+# tools/gen_spaces_compiler.py — 修正版（CI 用）
 import sys
 
 def main():
     bf = []
 
-    # emit: Brainfuck 命令文字のみを収集する（安全のためフィルタする）
+    # BF 命令文字のみを受け取るフィルタ付き emit
     BF_CHARS = set("><+-.,[]")
     def emit(s: str):
-        # 受け取った文字列から BF 命令文字のみを抽出して蓄える
         cleaned = "".join(ch for ch in s if ch in BF_CHARS)
         if cleaned:
             bf.append(cleaned)
 
-    # --- ELF Header (bytes) ---
+    # --- ELF Header ---
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -29,31 +28,27 @@ def main():
         0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     ]
-    # header の各バイトを '+' を繰り返して出力し、出力後にセルをクリアするよう統一
     for b in header:
         if b:
             emit('+' * b + '.[-]')
         else:
-            # 元コードは '.' のみでセルをクリアしていなかった箇所があったため統一
-            emit('.[-]')
+            emit('.')
 
     init_code = [0x49, 0xbd, 0x00, 0x80, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00]
     for b in init_code:
         if b:
             emit('+' * b + '.[-]')
         else:
-            emit('.[-]')
+            emit('.')
 
     # --- Helper: Read ONE Valid Bit ---
-    # weight: how many bits to set when valid
     def read_valid_bit(weight: int):
-        # ここで渡す文字列は可読性のため空白を含むことがあるが emit() がフィルタする
         emit('[-]+[')
         emit(',')
         # Check EOF 0
         emit('[')
         # Check EOF 255
-        emit('>[-]+<[->-<]')
+        emit('>[-]+<[- >-<]'.replace(' ', ''))  # keep exact BF tokens
         # If 255 (C1=1), Exit All
         emit('>')
         emit('[>>>>>[-]<<<<<[-]<[-]]')
@@ -87,8 +82,7 @@ def main():
         # If F (C3=1)
         emit('>>>')
         emit('[')
-        # input twice, then add weight to some accumulator (元コードの意図を保持)
-        emit('[-]<<<<,,' )
+        emit('[-]<<<<,,')   # input twice
         emit('>>>>>' + '+' * weight + '<<<<<')
         emit('>>>')
         emit(']')
@@ -113,7 +107,6 @@ def main():
 
     emit('>>>>>')
 
-    # bytes 出力用ヘルパー（バイト値の検査を追加）
     def emit_bytes(bs):
         for b in bs:
             if not (0 <= b <= 0xFF):
@@ -121,9 +114,6 @@ def main():
             emit('>' + '+' * b + '.[-]<')
 
     # Case 0: >
-    emit('>[-]+<[>[-]<[-]]>[)')
-    # 上の行の末尾に表記ゆれがあったため、正確な BF 命令だけを emit() に渡すよう修正
-    # 実際に出力したいバイト列
     emit('>[-]+<[>[-]<[-]]>[')
     emit_bytes([0x49, 0xff, 0xc5])
     emit('[-]]<')
@@ -149,9 +139,11 @@ def main():
     # Case 4: .
     emit('-')
     emit('>[-]+<[>[-]<[-]]>[')
-    emit_bytes([0xb8, 0x01, 0x00, 0x00, 0x00,
-                0xbf, 0x01, 0x00, 0x00, 0x00,
-                0x4c, 0x89, 0xee, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05])
+    emit_bytes([
+        0xb8, 0x01, 0x00, 0x00, 0x00,
+        0xbf, 0x01, 0x00, 0x00, 0x00,
+        0x4c, 0x89, 0xee, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05
+    ])
     emit('[-]]<')
 
     # Case 5: ,
@@ -174,27 +166,14 @@ def main():
     emit(']]]')
     emit(']')
 
-    # Padding (元の意図を維持)
+    # Padding
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
     emit('>>[-]' + '+' * 255 + '[>[-]' + '+' * 255 + '[>.<-]<-]')
 
-    # Spaces mapping: ' ' と 全角スペースを使う変換（元仕様に合わせる）
     S, F = " ", "\u3000"
-    mapping = {
-        '>': S * 3,
-        '<': S * 2 + F,
-        '+': S + F + S,
-        '-': S + F + F,
-        '.': F + S + S,
-        ',': F + S + F,
-        '[': F * 2 + S,
-        ']': F * 3,
-    }
-
+    mapping = {'>':S*3, '<':S*2+F, '+':S+F+S, '-':S+F+F, '.':F+S+S, ',':F+S+F, '[':F*2+S, ']':F*3}
     full_bf = "".join(bf)
-    # mapping で置換してバイト列にして出力
-    out = "".join(mapping.get(c, "") for c in full_bf)
-    sys.stdout.buffer.write(out.encode('utf-8'))
+    sys.stdout.buffer.write("".join([mapping.get(c, '') for c in full_bf]).encode('utf-8'))
 
 
 if __name__ == "__main__":
