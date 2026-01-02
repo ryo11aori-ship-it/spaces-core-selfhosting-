@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler with Long Jumps (32-bit offsets)
-# Fix: Replaced Short Jumps (EB/74) with Long Jumps (E9/0F84) to handle large loops in self-hosting.
-#      Implemented 32-bit Little Endian Patching logic in raw Spaces.
+# Level 1.9: Full BF Compiler with Long Jumps
+# Fix: Rewrote 'append_from_c5' to safely transfer value from C5 to Buffer End
+#      using strict Scan-Left-To-Wall navigation.
 
 import sys
 
@@ -20,18 +20,21 @@ def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
+# Memory Layout
 WALL_POS = 98
 BUFFER_BASE = 100
 TOKEN_WALL_POS = 298
 TOKEN_BASE = 300
 TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS
 
+def emit_byte_tracked(val):
+    right(8); clear()
+    if val > 0: inc(val)
+    out(); clear(); left(8)
+    right(7); inc(); left(7)
+
 def emit_bytes(vals):
-    for v in vals:
-        right(8); clear()
-        if v > 0: inc(v)
-        out(); clear(); left(8)
-        right(7); inc(); left(7)
+    for v in vals: emit_byte_tracked(v)
 
 def copy_c0_to_c1():
     right(1); clear(); right(2); clear(); left(3)
@@ -50,15 +53,38 @@ def append_safe(vals):
         left(WALL_POS); right(8); inc(); left(8)
 
 def append_from_c5():
+    # 1. Create a new slot at Buffer End
     right(BUFFER_BASE)
     loop_open(); right(2); loop_close()
-    inc()
-    right(1); clear()
-    left(BUFFER_BASE+1); right(5)
-    loop_open(); dec(); left(5); left(WALL_POS); right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(); inc(); left(); loop_open(); left(2); loop_close(); left(BUFFER_BASE); right(WALL_POS); right(5)
+    inc()        # Flag=1
+    right(1); clear() # Data=0
+    # Return Home
+    left(2); loop_open(); left(2); loop_close()
+    left(WALL_POS)
+    
+    # 2. Transfer value from C5 to that slot
+    right(5)
+    loop_open()
+       dec(); left(5) # C0
+       
+       # Go to Buffer End
+       right(BUFFER_BASE)
+       loop_open(); right(2); loop_close()
+       # We are at Flag=0 (End). Previous Data is Target.
+       left(1) # At Data
+       inc()
+       
+       # Return Home
+       left(1) # At Flag
+       left(2); loop_open(); left(2); loop_close()
+       left(WALL_POS)
+       
+       right(5)
     loop_close()
     left(5)
-    right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(2); clear(); left(2); loop_open(); left(2); loop_close(); left(WALL_POS); right(8); inc(); left(8)
+
+    # 3. Update Counter C8
+    right(8); inc(); left(8)
 
 def compile_bracket_open():
     right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
