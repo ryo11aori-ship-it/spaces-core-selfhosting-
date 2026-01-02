@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_basic.py
-# Level 1.5: Brainfuck Compiler (Basic 6 Commands: + - > < . ,)
-# Note: Loop commands [ ] are NOT supported yet.
+# Level 1.5: Brainfuck Compiler (Basic 6 Commands)
+# Fixed: Removed all visual indentation that caused Syntax Errors.
 
 import sys
 
@@ -61,16 +61,15 @@ def check_and_emit(char_code, bytes_to_emit):
     # If Match (C3==1)
     right(2)
     loop_open()
-       left(3) # C0
-       emit_bytes(bytes_to_emit)
-       right(3); clear(); loop_close()
+    left(3) # C0
+    emit_bytes(bytes_to_emit)
+    right(3); clear(); loop_close()
     left(3) # C0
 
 def main():
-    total_size = 500 # Increased for more logic
+    total_size = 500
     load_addr = 0x400000
     header_len = 120
-    data_addr = 0x402000 # Data pointer initial address
     
     def p64(v): return list(v.to_bytes(8, "little"))
     def p32(v): return list(v.to_bytes(4, "little"))
@@ -92,7 +91,6 @@ def main():
     
     # 2. Init Code
     # mov rbx, 0x402000 (Data Pointer)
-    # Opcode: 48 C7 C3 00 20 40 00
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
 
     # 3. Main Loop
@@ -122,8 +120,6 @@ def main():
     check_and_emit(45, [0xfe, 0x0b])
     
     # . (46): write(1, rbx, 1)
-    # mov eax, 1; mov edi, 1; mov rsi, rbx; mov edx, 1; syscall
-    # B8 01 00 00 00, BF 01 00 00 00, 48 89 DE, BA 01 00 00 00, 0F 05
     dot_code = [
         0xb8, 0x01, 0x00, 0x00, 0x00,
         0xbf, 0x01, 0x00, 0x00, 0x00,
@@ -134,7 +130,6 @@ def main():
     check_and_emit(46, dot_code)
     
     # , (44): read(0, rbx, 1)
-    # mov eax, 0; mov edi, 0; mov rsi, rbx; mov edx, 1; syscall
     comma_code = [
         0xb8, 0x00, 0x00, 0x00, 0x00,
         0xbf, 0x00, 0x00, 0x00, 0x00,
