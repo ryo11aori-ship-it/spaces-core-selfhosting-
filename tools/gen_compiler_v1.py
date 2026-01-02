@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
 # Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fix 1: Explicitly CLEAR C0 before inp() because 'read' syscall doesn't zero-out on EOF.
-#        This prevents the infinite loop that created the 2.5MB file.
-# Fix 2: Corrected pointer arithmetic inside match handlers (C5->C0 is left(5), not left(3)).
+# Fix: Corrected Logic Flow for EOF check and Char matching.
+#      Previous version destroyed data before checking, leading to false EOF.
 
 import sys
 
@@ -29,13 +28,13 @@ def clear(): loop_start(); dec(); loop_end()
 # --- Simplified Tracked Output (1 Byte Only) ---
 # C0: Working Cursor
 # C7: Byte Counter (Max 255)
+# C9: Scratch for output
 
 def emit_byte_tracked(val):
     # Output byte (C0 -> C9 -> C0)
     right(9); clear(); inc(val); out(); clear(); left(9)
     # Increment Counter C7 (C0 -> C7 -> C0)
     right(7); inc(); left(7)
-    # Return to C0
 
 def emit_machine_code_tracked(bytes_list):
     for b in bytes_list: emit_byte_tracked(b)
@@ -65,80 +64,103 @@ def main():
     emit_machine_code_tracked([0x48, 0x31, 0xdb])
 
     # 3. Main Loop
-    # C2: Loop Flag
-    right(2); clear(); inc(); loop_start(); left(2) # Infinite loop until break
+    # C2: Loop Flag (1 = Running)
+    right(2); clear(); inc(); loop_start(); left(2) 
 
-    # [FIX 1] Clear C0 before reading!
-    # If read() returns 0 bytes (EOF), C0 must be 0 for the EOF check to work.
+    # Read Input to C0
+    # Clear C0 first because inp() behavior on EOF is to leave cell unchanged
     clear()
     inp()
     
-    # Check EOF (0)
-    # Clear C1 (Scratch)
-    right(); clear(); left()
+    # --- LOGIC START: COPY & CHECK PATTERN ---
+    # We need to preserve C0 for multiple checks (+, -).
+    # Pattern: Copy C0 -> C1 & C3. Check C3. Restore C0 from C1.
     
-    # Copy C0->C3 (Using C1 as scratch)
-    # C0 to C3 copy
-    right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+    # 1. Check EOF (Is C0 == 0?)
+    # Clear C1, C3
+    right(); clear(); right(2); clear(); left(3)
     
-    # Check if C3 is 0 (it is copy of C0)
-    # If C0==0, C3==0. We want Flag(C1)=1.
-    # Logic: Set C1=1. If C3!=0, Set C1=0.
-    right(); inc(); right(2); loop_start(); left(2); clear(); right(2); clear(); loop_end()
+    # Copy C0 -> C1 & C3
+    loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     
-    # If Flag(C1)==1 (EOF), Break Main Loop (C2=0)
-    # We are at C3.
-    left(2); loop_start(); clear(); right(); clear(); left(); loop_end(); left() # Back to C0
+    # Check C3. If C3==0, it's EOF.
+    # We use C5 as "Is Zero Flag". Set C5=1.
+    right(5); clear(); inc(); left(5)
+    # If C3 != 0, Set C5=0.
+    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
     
-    # Check '+' (43)
-    right(2); loop_start(); left(2) # If C2 is active
+    # If C5==1 (EOF), Break C2 Loop.
+    right(5); loop_start(); clear(); left(3); dec(); right(3); loop_end(); left(5)
     
-    # Clear C1
-    right(); clear(); left()
+    # Restore C0 from C1 (Only if not broken, but broken loop won't exec this effectively)
+    right(); loop_start(); dec(); left(); inc(); right(); loop_end(); left()
     
-    # Copy C0->C3
-    right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
     
-    # Check if C3 == 43
-    right(3); dec(43); right(2); clear(); inc(); left(2); loop_start(); right(2); clear(); left(2); clear(); loop_end()
+    # 2. Check '+' (43)
+    # Check if loop C2 is still active
+    right(2); loop_start(); left(2)
     
-    # If Match (C5=1), Emit "inc rbx"
-    # We are at C3. Flag is at C5.
-    right(2); loop_start()
-    clear() # Clear Flag
-    # [FIX 2] Go to C0. From C5, left(5) -> C0.
-    left(5)
+    # Clear C1, C3
+    right(); clear(); right(2); clear(); left(3)
+    # Copy C0 -> C1 & C3
+    loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
+    
+    # Sub 43 from C3
+    right(3); dec(43); left(3)
+    
+    # Check if C3 == 0 (Match).
+    # Set C5=1 (Match Flag).
+    right(5); clear(); inc(); left(5)
+    # If C3 != 0, Set C5=0.
+    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
+    
+    # If Match (C5==1), Emit Bytes
+    right(5); loop_start()
+    clear() # Clear match flag
+    left(5) # Go to C0
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
     right(5) # Back to C5
-    loop_end(); left(5) # Back to C0
+    loop_end(); left(5)
     
-    right(2); loop_end(); left(2)
+    # Restore C0 from C1
+    right(); loop_start(); dec(); left(); inc(); right(); loop_end(); left()
+    
+    right(2); loop_end(); left(2) # End C2 check
 
-    # Check '-' (45)
-    right(2); loop_start(); left(2) # If C2 is active
+
+    # 3. Check '-' (45)
+    # Check if loop C2 is still active
+    right(2); loop_start(); left(2)
     
-    right(); clear(); left()
+    # Clear C1, C3
+    right(); clear(); right(2); clear(); left(3)
+    # Copy C0 -> C1 & C3
+    loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     
-    # Copy C0->C3
-    right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+    # Sub 45 from C3
+    right(3); dec(45); left(3)
     
-    # Check if C3 == 45
-    right(3); dec(45); right(2); clear(); inc(); left(2); loop_start(); right(2); clear(); left(2); clear(); loop_end()
+    # Check if C3 == 0 (Match).
+    right(5); clear(); inc(); left(5)
+    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
     
-    # If Match (C5=1), Emit "dec rbx"
-    right(2); loop_start()
+    # If Match (C5==1), Emit Bytes
+    right(5); loop_start()
     clear()
-    left(5)
+    left(5) # Go to C0
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
     right(5)
     loop_end(); left(5)
     
-    right(2); loop_end(); left(2)
+    # Restore C0 from C1
+    right(); loop_start(); dec(); left(); inc(); right(); loop_end(); left()
+    
+    right(2); loop_end(); left(2) # End C2 check
+
 
     right(2); loop_end(); left(2) # End Main Loop
 
     # 4. Exit Sequence
-    # mov edi, ebx; mov eax, 60; syscall
     emit_machine_code_tracked([0x89, 0xdf, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
 
     # 5. Pad to 200 bytes
