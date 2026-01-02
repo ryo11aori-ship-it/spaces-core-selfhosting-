@@ -1,8 +1,24 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
 # Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fix: Added missing 'clear()' inside the EOF break loop. 
-#      Previously, the loop [ dec C2 ] ran forever because the condition flag (C5) wasn't cleared.
+# Fixes:
+#  - Use C1 (not C3) as the preserved copy for comparisons (EOF / '+' / '-')
+#  - Adjusted movement offsets when checking/clearing the match/EOF flag (C5)
+#  - Kept the previously added clear() inside the EOF-break loop
+#
+# Cell layout (indices):
+#  C0: Working Cursor / Input byte
+#  C1: Scratch copy (preserved for checks)
+#  C2: Loop Flag (Main loop)
+#  C3: Temp used during copy/restore (transient)
+#  C4: (unused)
+#  C5: Match / EOF Flag
+#  C6: (unused)
+#  C7: Byte Counter (incremented per emitted byte)
+#  C8..C9: other helpers
+#
+# This version changes comparisons to read C1 (which still contains the copied value
+# after the copy/restore sequences), rather than C3 (which is transient and becomes 0).
 
 import sys
 
@@ -45,7 +61,7 @@ def main():
     load_addr = 0x400000
     header_len = 120
     total_size = 200 # 0xC8
-    
+
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
         0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -64,30 +80,31 @@ def main():
 
     # 3. Main Loop
     # C2: Loop Flag
-    right(2); clear(); inc(); loop_start(); left(2) 
+    right(2); clear(); inc(); loop_start(); left(2)
 
     # [STEP 1] Read Input
     clear() # Clear C0
     inp()   # Read to C0
-    
+
     # [STEP 2] EOF Check
-    # Strategy: Copy C0 -> C1 & C3. Check C3. If 0, Break C2.
-    
+    # Strategy: Copy C0 -> C1 & C3. Check preserved copy in C1. If 0, Break C2.
+
     # Clear Scratch C1
     right(); clear(); left()
-    
+
     # Copy C0 -> C1 & C3
+    # (Use transient copy via C3 and leave C1 preserved)
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-    
-    # Check C3 (Copy of C0). If 0, it is EOF.
+
     # Set Flag C5 = 1 (Assume EOF).
     right(5); clear(); inc(); left(5)
-    
-    # If C3 != 0, Set Flag C5 = 0.
-    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
-    
+
+    # If C1 != 0, Set Flag C5 = 0.
+    # (Move to C1, loop while C1 != 0, and clear C5 inside to indicate not-EOF)
+    right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
+
     # If Flag C5 == 1, Break Main Loop C2.
     right(5)
     loop_start()
@@ -95,55 +112,55 @@ def main():
     left(3); dec(); right(3) # Break C2
     loop_end()
     left(5)
-    
-    
+
+
     # [STEP 3] Check '+' (43)
     # Only run if C2 is still 1
     right(2); loop_start(); left(2)
-    
+
     # Clear Scratch C1
     right(); clear(); left()
-    
+
     # Copy C0 -> C1 & C3
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-    
-    # Subtract 43 from C3
-    right(3); dec(43); left(3)
-    
-    # Check if C3 == 0 (Match). Set Flag C5 = 1.
+
+    # Subtract 43 from C1 (preserved copy)
+    right(1); dec(43); left(1)
+
+    # Check if C1 == 0 (Match). Set Flag C5 = 1.
     right(5); clear(); inc(); left(5)
-    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
-    
+    right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
+
     # If Match (C5 == 1), Emit Code
     right(5); loop_start()
-    clear() # Clear Match Flag
+    clear() # Clear Match Flag (run loop exactly once)
     left(5) # Go to C0
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3) # inc rbx
     right(5) # Back to C5
     loop_end(); left(5)
-    
+
     right(2); loop_end(); left(2) # End C2 Check
 
     # [STEP 4] Check '-' (45)
     right(2); loop_start(); left(2)
-    
+
     # Clear Scratch C1
     right(); clear(); left()
-    
+
     # Copy C0 -> C1 & C3
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-    
-    # Subtract 45 from C3
-    right(3); dec(45); left(3)
-    
-    # Check if C3 == 0 (Match).
+
+    # Subtract 45 from C1 (preserved copy)
+    right(1); dec(45); left(1)
+
+    # Check if C1 == 0 (Match).
     right(5); clear(); inc(); left(5)
-    right(3); loop_start(); clear(); right(2); clear(); left(2); loop_end(); left(3)
-    
+    right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
+
     # If Match (C5 == 1), Emit Code
     right(5); loop_start()
     clear()
@@ -151,7 +168,7 @@ def main():
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb) # dec rbx
     right(5)
     loop_end(); left(5)
-    
+
     right(2); loop_end(); left(2) # End C2 Check
 
     right(2); loop_end(); left(2) # End Main Loop
