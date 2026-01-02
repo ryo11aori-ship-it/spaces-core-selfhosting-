@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
 # Level 1.9: Full BF Compiler with Long Jumps
-# Fix: Rewrote 'append_from_c5' to safely transfer value from C5 to Buffer End
-#      using strict Scan-Left-To-Wall navigation.
+# Fix: FLATTENED ALL CODE. NO INDENTATION ALLOWED.
 
 import sys
 
@@ -20,7 +19,6 @@ def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
-# Memory Layout
 WALL_POS = 98
 BUFFER_BASE = 100
 TOKEN_WALL_POS = 298
@@ -53,37 +51,23 @@ def append_safe(vals):
         left(WALL_POS); right(8); inc(); left(8)
 
 def append_from_c5():
-    # 1. Create a new slot at Buffer End
     right(BUFFER_BASE)
     loop_open(); right(2); loop_close()
-    inc()        # Flag=1
-    right(1); clear() # Data=0
-    # Return Home
+    inc()
+    right(1); clear()
     left(2); loop_open(); left(2); loop_close()
     left(WALL_POS)
-    
-    # 2. Transfer value from C5 to that slot
     right(5)
     loop_open()
-       dec(); left(5) # C0
-       
-       # Go to Buffer End
-       right(BUFFER_BASE)
-       loop_open(); right(2); loop_close()
-       # We are at Flag=0 (End). Previous Data is Target.
-       left(1) # At Data
-       inc()
-       
-       # Return Home
-       left(1) # At Flag
-       left(2); loop_open(); left(2); loop_close()
-       left(WALL_POS)
-       
-       right(5)
+    dec(); left(5)
+    right(BUFFER_BASE)
+    loop_open(); right(2); loop_close()
+    left(1); inc(); left(1)
+    left(2); loop_open(); left(2); loop_close()
+    left(WALL_POS)
+    right(5)
     loop_close()
     left(5)
-
-    # 3. Update Counter C8
     right(8); inc(); left(8)
 
 def compile_bracket_open():
