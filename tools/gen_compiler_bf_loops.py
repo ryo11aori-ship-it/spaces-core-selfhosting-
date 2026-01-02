@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
 # Level 1.8: Full Brainfuck Compiler with Loops
-# Fix: Avoid tape-pointer underflow by using relative moves when scanning token wall.
+# Fix: Add initial pointer headroom to avoid tape-pointer underflow.
+#       Keep previously applied relative-move fixes.
 
 import sys
 
@@ -20,17 +21,6 @@ def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
 # Memory Layout
-# C0: Input Char
-# C1-C6: Scratch
-# C7: Output Byte Counter
-# C8: Output Buffer Count
-# C40: Loop Start Index (Simple Stack for 1 level)
-# C98: Buffer Wall (0)
-# C99: Buffer Sentinel (255)
-# C100+: Buffer [Flag, Data]
-# C298: Token Wall (0)
-# C300+: Token Track
-
 WALL_POS = 98
 BUFFER_BASE = 100
 TOKEN_WALL_POS = 298
@@ -93,43 +83,34 @@ def patch_c40_with_diff():
     right(40); loop_open(); dec(); left(37); dec(); right(37); loop_close(); left(40)
     right(3); dec(); left(3)
     
-    # 2. Place Token at C300 (token track)
+    # 2. Place Token at token track
     right(TOKEN_BASE); inc(); left(TOKEN_BASE)
     
-    # 3. Move Token Right C40 times (this moves a marker along token track)
+    # 3. Move Token Right C40 times (marker movement)
     right(40); loop_open(); dec(); left(40)
-    # inner routine moves token along by small steps (keeps pointer safety)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
     right(40); loop_close(); left(40)
     
-    # 4. Find Token: move to token track then step left to target track (target is at left offset 199)
+    # 4. Find Token and clear target
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
-    # At Token (300 track). Target is Left 199 (100 track).
     left(199)
     clear() # Clear Target
     
     # 5. Return to Token before going Home
     right(199)
-    # Instead of a huge absolute left(TOKEN_WALL_POS) which caused underflow,
-    # move left only by TOKEN_DELTA (token -> token wall distance, small and safe).
+    # SAFETY: instead of large absolute left to token wall, move only TOKEN_DELTA (small, safe)
     left(TOKEN_DELTA)
     
     # 6. Move C3 (Diff) to C4
     right(3); loop_open(); dec(); right(1); inc(); left(1); loop_close(); left(3)
     
-    # 7. Add C4 to Target
-    # Find Token again (move to token track)
+    # 7. Add C4 to Target (safe relative moves)
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
-    left(199) # Go to Target
-    
-    # Add C4: go back to C4 then for each decrement of C4 add to target
-    # Go back to C4: we are at Target; move right 199 to token, then move left TOKEN_DELTA to reach token wall,
-    # then right(4) to reach C4. This sequence uses only small, safe relative moves.
+    left(199) # go to target
+    # go back to C4 via safe relative path
     right(199)
-    # move left to token wall (small safe move)
     left(TOKEN_DELTA)
     right(4)
-    # Loop C4: Dec, Go Target, Inc, Go Back
     loop_open()
     dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
     inc()
@@ -137,7 +118,7 @@ def patch_c40_with_diff():
     loop_close()
     left(4)
     
-    # 8. Clear Token
+    # 8. Clear Token (safe)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
 
 def check_char(char_code, logic_func):
@@ -166,6 +147,14 @@ def main():
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
     emit_bytes(header + prog_header)
+
+    # === SAFETY: allocate headroom so no left(...) will underflow ===
+    # Move the pointer well to the right at program start. All subsequent
+    # left(...) operations will then be offset from this safe baseline.
+    # 1000 is chosen conservatively; adjust if your VM tape is smaller.
+    right(1000)
+
+    # original setup (relative to the above pointer)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
     right(WALL_POS); clear(); right(); inc(255); left(100)
     right(TOKEN_WALL_POS); clear(); left(TOKEN_WALL_POS)
