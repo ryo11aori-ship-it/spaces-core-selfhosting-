@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage12-diagnosis:
+  stage13-compiler-v1:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,98 +17,54 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      # --- Level 0: Static Compiler Check (Previous) ---
-      - name: Generate Static Compiler
+      # --- Level 0.8: BF to ELF Compiler (New) ---
+      - name: Generate Compiler V1
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_spaces_direct.py > spaces/self/spaces_compiler.spaces
-          echo "=== BF debug head ==="
-          head -n 5 bf_debug.log || true
-
-      - name: Prepare Spaces Source
-        run: |
-          # 1. ASCIIソース作成
-          echo "+++++++++[>++++++++>+++++++++++>+++++<<<-]>.>++.+++++++..+++.>-.------------.<++++++++.--------.+++.------.--------.>+." > hello.bf
-          
-          # 2. Spaces変換
-          python3 tools/generator.py hello.bf > hello.spaces
-
-          # 【診断1】入力ファイルの中身を確認
-          echo "=== DIAGNOSIS: hello.spaces (First 64 bytes) ==="
-          ls -l hello.spaces
-          od -t x1 hello.spaces | head -n 4
-          echo "================================================"
-
-      - name: Compile (Static)
-        run: |
-          echo "Compiling hello.spaces..."
-          ./bin/ref_vm spaces/self/spaces_compiler.spaces < hello.spaces > hello_spaces.elf
-          chmod +x hello_spaces.elf
-          
-          # 【診断2】出力ファイルの中身を確認
-          echo "=== DIAGNOSIS: hello_spaces.elf (First 256 bytes) ==="
-          ls -l hello_spaces.elf
-          od -t x1 hello_spaces.elf | head -n 16
-          echo "====================================================="
-
-      - name: Run Static Binary
-        run: |
-          echo "Running..."
-          ./hello_spaces.elf > output.txt
-          cat output.txt
-          if grep -q "Hello, world!" output.txt; then
-            echo "🎉 SUCCESS: Static Compiler works!"
-          else
-            echo "❌ Failed."
-            exit 1
-          fi
-
-      # --- Level 0.5: Smart Compiler Check (New) ---
-      - name: Generate Smart Compiler
-        run: |
           # 1. コンパイラ（Spacesコード）を生成
-          python3 tools/gen_smart_compiler.py > spaces/self/smart_compiler.spaces
+          python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
 
-      - name: Compile hello.spaces using Smart Compiler
+      - name: Prepare Test Source
         run: |
-          # 2. Spacesコンパイラを実行（入力として hello.spaces を与える）
-          ./bin/ref_vm spaces/self/smart_compiler.spaces < hello.spaces > hello_smart.elf
+          # テスト用ソースコード: 5回インクリメントする
+          # これがコンパイルされると、終了コード 5 を返すバイナリになるはず
+          echo -n "+++++" > test.bf
 
-      - name: Verify Smart Compiler Output
+      - name: Compile test.bf
         run: |
-          # 3. 生成されたバイナリを実行権限付与
-          chmod +x hello_smart.elf
+          # 2. Spacesコンパイラを実行
+          # コンパイラは test.bf を読み、機械語に翻訳して test.elf を出力する
+          ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
 
-          # 期待値の取得: hello.spaces の先頭1バイトを数値(0-255)として取得
-          EXPECTED_CODE=$(od -An -t u1 -N 1 hello.spaces | tr -d ' \n')
-          echo "Expected Exit Code (First byte of input): $EXPECTED_CODE"
-
+      - name: Verify Compiled Binary
+        run: |
+          # 3. 実行権限付与
+          chmod +x test.elf
+          
+          echo "Running compiled binary..."
+          
           # 4. 実行して終了コードを確認
           set +e
-          ./hello_smart.elf
+          ./test.elf
           ACTUAL_CODE=$?
           set -e
 
-          echo "Actual Exit Code: $ACTUAL_CODE"
+          echo "Exit Code: $ACTUAL_CODE"
 
-          # 判定
-          if [ "$ACTUAL_CODE" -eq "$EXPECTED_CODE" ]; then
-            echo "🎉 SUCCESS: Exit code reflects the input file content!"
-            echo "Input byte: $EXPECTED_CODE, Output exit code: $ACTUAL_CODE"
+          # 判定: ソースコードが "+" 5個なので、終了コードは 5 になるはず
+          if [ "$ACTUAL_CODE" -eq 5 ]; then
+            echo "🎉 SUCCESS: The compiler translated '+++++' into functional machine code!"
           else
-            echo "❌ FAILED: Exit code does not match."
-            echo "Expected: $EXPECTED_CODE, Got: $ACTUAL_CODE"
+            echo "❌ FAILED: Exit code mismatch."
+            echo "Expected: 5, Got: $ACTUAL_CODE"
             exit 1
           fi
 
-      # 最後にまとめてアーティファクトを保存
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-outputs
+          name: compiler-v1-outputs
           path: |
-            hello.spaces
-            hello_spaces.elf
-            output.txt
-            spaces/self/smart_compiler.spaces
-            hello_smart.elf
+            spaces/self/compiler_v1.spaces
+            test.bf
+            test.elf
