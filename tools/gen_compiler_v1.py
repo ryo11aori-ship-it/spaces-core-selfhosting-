@@ -1,34 +1,29 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
-# Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fixes applied:
-#  - Append a real newline between emitted groups to avoid accidental F/S token merging.
-#  - Use C1 as the preserved comparison copy.
-#  - After generation, count loop_start / loop_end patterns and append missing loop_end tokens
-#    at EOF so .spaces has matched loop tokens (pragmatic safety fix to avoid VM hangs).
+# Spaces Compiler Generator — robust variant with explicit loop balancing counters.
+# - Emits a real '\n' after every logical emit to avoid accidental token merging.
+# - Tracks loop_start/loop_end calls in Python (ls_count/le_count).
+# - Appends missing loop_end tokens at EOF if ls_count > le_count.
 #
-# Save as tools/gen_compiler_v1.py (or a new file) and run:
+# Save this as tools/gen_compiler_v1.py and run:
 #   python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
-#
-# Then run your VM exactly as in CI:
-#   timeout 10s ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
-#   chmod +x test.elf
-#   ./test.elf
-#
-# If the exit code isn't as expected, attach the generated .spaces and test.elf and I'll inspect.
 
 import sys
 
 def p64(val): return list(val.to_bytes(8, 'little'))
 def p32(val): return list(val.to_bytes(4, 'little'))
 
-# --- Constants ---
-S = " "
-F = "\u3000"
+S = " "         # half-width space
+F = "\u3000"    # full-width space used by this esolang
 CMDS = []
 
-# Emit with a real newline separator to prevent adjacent emits forming FFS/FFF
+# loop counters (track how many explicit loop_start/loop_end we emitted)
+ls_count = 0
+le_count = 0
+
 def emit(s):
+    # Append a real newline after each logical emit to ensure no accidental merging
+    # between adjacent emits (newlines are ignored by the VM).
     CMDS.append(s + '\n')
 
 def right(n=1): emit((S+S+S)*n)
@@ -37,14 +32,26 @@ def inc(n=1): emit((S+F+S)*n)
 def dec(n=1): emit((S+F+F)*n)
 def out(): emit(F+S+S)
 def inp(): emit(F+S+F)
-def loop_start(): emit(F+F+S)
-def loop_end(): emit(F+F+F)
-def clear(): loop_start(); dec(); loop_end()
 
-# --- Simplified Tracked Output (1 Byte Only) ---
-# C0: Working Cursor
-# C7: Byte Counter (Max 255)
+def loop_start():
+    global ls_count
+    ls_count += 1
+    emit(F+F+S)
 
+def loop_end():
+    global le_count
+    le_count += 1
+    emit(F+F+F)
+
+def clear(): 
+    # clear current cell: [ loop_start(); dec(); loop_end() ]
+    # keep using loop_start()/loop_end() so python counters remain accurate.
+    loop_start()
+    dec()
+    loop_end()
+
+# --- Tracked byte-emission helpers ---
+# Uses C0 -> C9 trick for output then increments C7 counter.
 def emit_byte_tracked(val):
     # Output byte (C0 -> C9 -> C0)
     right(9); clear(); inc(val); out(); clear(); left(9)
@@ -52,15 +59,17 @@ def emit_byte_tracked(val):
     right(7); inc(); left(7)
 
 def emit_machine_code_tracked(bytes_list):
-    for b in bytes_list: emit_byte_tracked(b)
+    for b in bytes_list:
+        emit_byte_tracked(b)
 
 def main():
-    right(16) # Safety margin
+    # Safety margin
+    right(16)
 
-    # 1. Emit ELF Header (Target Total Size: 200 bytes)
+    # 1. ELF header (minimal, target total_size 200)
     load_addr = 0x400000
     header_len = 120
-    total_size = 200 # 0xC8
+    total_size = 200
 
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
@@ -73,120 +82,118 @@ def main():
         *p64(0), *p64(load_addr), *p64(load_addr),
         *p64(total_size), *p64(total_size), *p64(0x1000)
     ]
-    for b in header + prog_header: emit_byte_tracked(b)
+    for b in header + prog_header:
+        emit_byte_tracked(b)
 
-    # 2. Init Code: xor rbx, rbx
+    # 2. xor rbx, rbx
     emit_machine_code_tracked([0x48, 0x31, 0xdb])
 
     # 3. Main Loop
-    # C2: Loop Flag
+    # C2 is main loop flag
     right(2); clear(); inc(); loop_start(); left(2)
 
-    # [STEP 1] Read Input
-    clear() # Clear C0
-    inp()   # Read to C0
+    # [STEP1] read input into C0
+    clear()
+    inp()
 
-    # [STEP 2] EOF Check
-    # Strategy: Copy C0 -> C1 & C3. Check preserved copy in C1. If 0, Break C2.
+    # [STEP2] EOF check: copy C0 -> C1 & C3; check preserved copy in C1
+    right(); clear(); left()            # clear C1
 
-    # Clear Scratch C1
-    right(); clear(); left()
-
-    # Copy C0 -> C1 & C3 (preserve in C1)
+    # copy C0 -> C1 & C3 (transient)
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
 
-    # Set Flag C5 = 1 (Assume EOF).
+    # assume EOF: C5 = 1
     right(5); clear(); inc(); left(5)
 
-    # If C1 != 0, Set Flag C5 = 0.
+    # if C1 != 0 then clear C5
     right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
 
-    # If Flag C5 == 1, Break Main Loop C2.
+    # if C5==1 break main loop C2
     right(5)
     loop_start()
-    clear() # [FIXED] clear flag so we don't loop forever
-    left(3); dec(); right(3) # Break C2
+    clear()           # clear flag to avoid loop forever
+    left(3); dec(); right(3)
     loop_end()
     left(5)
 
-
-    # [STEP 3] Check '+' (43)
+    # [STEP3] check '+'
     right(2); loop_start(); left(2)
 
-    # Clear Scratch C1
     right(); clear(); left()
 
-    # Copy C0 -> C1 & C3
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
 
-    # Subtract 43 from C1 (preserved copy)
+    # subtract 43 from preserved C1
     right(1); dec(43); left(1)
 
-    # Check if C1 == 0 (Match). Set Flag C5 = 1.
+    # check C1 == 0 -> set C5 = 1 if match
     right(5); clear(); inc(); left(5)
     right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
 
-    # If Match (C5 == 1), Emit Code
-    right(5); loop_start()
-    clear() # Clear Match Flag (run loop exactly once)
-    left(5) # Go to C0
-    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3) # inc rbx
-    right(5) # Back to C5
-    loop_end(); left(5)
-
-    right(2); loop_end(); left(2) # End C2 Check
-
-    # [STEP 4] Check '-' (45)
-    right(2); loop_start(); left(2)
-
-    # Clear Scratch C1
-    right(); clear(); left()
-
-    # Copy C0 -> C1 & C3
-    right(3); clear(); left(3)
-    loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
-    right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
-
-    # Subtract 45 from C1 (preserved copy)
-    right(1); dec(45); left(1)
-
-    # Check if C1 == 0 (Match).
-    right(5); clear(); inc(); left(5)
-    right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
-
-    # If Match (C5 == 1), Emit Code
+    # if match emit inc rbx machine code
     right(5); loop_start()
     clear()
     left(5)
-    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb) # dec rbx
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
     right(5)
     loop_end(); left(5)
 
-    right(2); loop_end(); left(2) # End C2 Check
+    right(2); loop_end(); left(2)
 
-    right(2); loop_end(); left(2) # End Main Loop
+    # [STEP4] check '-'
+    right(2); loop_start(); left(2)
 
+    right(); clear(); left()
 
-    # 4. Exit Sequence
-    # mov edi, ebx; mov eax, 60; syscall
+    right(3); clear(); left(3)
+    loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
+    right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+
+    right(1); dec(45); left(1)
+
+    right(5); clear(); inc(); left(5)
+    right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
+
+    right(5); loop_start()
+    clear()
+    left(5)
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
+    right(5)
+    loop_end(); left(5)
+
+    right(2); loop_end(); left(2)
+
+    right(2); loop_end(); left(2)
+
+    # 4. exit sequence
     emit_machine_code_tracked([0x89, 0xdf, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
 
-    # 5. Pad to 200 bytes
+    # 5. pad to 200 bytes
     right(7); dec(200); loop_start(); inc(200); left(7); emit_byte_tracked(0); right(7); dec(200); loop_end(); inc(200); left(7)
 
-    # --- Post-process: balance loop tokens if needed ---
+    # --- Post-process: append missing loop_end tokens exactly as counted ---
     out_str = "".join(CMDS)
-    ls = out_str.count(F + F + S)
-    le = out_str.count(F + F + F)
+    # Python-side counters ls_count / le_count were updated by loop_start()/loop_end() calls
+    global ls_count, le_count
+    # Note: variables are defined at module top; ensure we reference them.
+    try:
+        ls = ls_count
+        le = le_count
+    except NameError:
+        # fallback when executed in different context
+        ls = out_str.count(F+F+S + '\n')
+        le = out_str.count(F+F+F + '\n')
+
     if ls > le:
         missing = ls - le
-        # Append missing loop_end tokens at EOF (pragmatic safety measure)
-        out_str += (F + F + F) * missing
+        # append exactly `missing` loop_end tokens (without newline merging risk)
+        out_str += (F + F + F + '\n') * missing
 
+    # Final write
     sys.stdout.buffer.write(out_str.encode('utf-8'))
 
 if __name__ == '__main__':
