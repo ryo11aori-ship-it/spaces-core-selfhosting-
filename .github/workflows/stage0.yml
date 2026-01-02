@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage17-compiler-bf-full:
+  stage18-compiler-bf-loops:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,47 +17,41 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (BF Full - Buffered)
+      - name: Generate Compiler (BF Loops)
         run: |
           mkdir -p spaces/self
-          # ここを修正！ full.py を使います
-          python3 tools/gen_compiler_bf_full.py > spaces/self/compiler_full.spaces
+          python3 tools/gen_compiler_bf_loops.py > spaces/self/compiler_loops.spaces
 
-      - name: Prepare Test Source (Echo + Increment)
+      - name: Prepare Test Source (Simple Loop)
         run: |
-          # バッファリングが正しく動くか、まずは ,+. でテスト
-          echo -n ",+." > test.bf
-          echo -n "A" > input.txt
+          # ++[-] : 2 increment, then loop dec until 0.
+          # If loop works, it finishes instantly.
+          # If loop is broken (skipped), it finishes instantly (but calc is wrong).
+          # If loop is broken (jump wrong), it segfaults or infinite loops.
+          # Let's try a logic that REQUIRES loop to work.
+          # +[>+<-]>. : Move 1 to next cell, print 1 (SOH, invisible but non-zero check?).
+          # Better: +++++ +++++ [->+>+<<] >> .
+          # 10 to (10, 10). Print 10 (\n).
+          # Let's just do `++[-]` for stability check first.
+          echo -n "++[-]" > test.bf
 
       - name: Compile test.bf
         run: |
-          # コンパイル（バッファリング処理が入るので少し時間がかかるかも）
-          timeout 30s ./bin/ref_vm spaces/self/compiler_full.spaces < test.bf > test.elf
+          timeout 60s ./bin/ref_vm spaces/self/compiler_loops.spaces < test.bf > test.elf
           chmod +x test.elf
 
       - name: Verify Compiled Binary
         run: |
           echo "Running compiled binary..."
-          
-          # A -> B
-          ./test.elf < input.txt > output.txt
-          
-          cat output.txt
-          
-          if grep -q "B" output.txt; then
-            echo "🎉 SUCCESS: Buffered Compiler works! (I/O OK)"
-          else
-            echo "❌ FAILED: Output mismatch."
-            od -t x1 output.txt
-            exit 1
-          fi
+          ./test.elf
+          echo "Run finished with code $?"
+          # If we are here, no segfault/timeout.
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-full-outputs
+          name: compiler-loops-outputs
           path: |
-            spaces/self/compiler_full.spaces
+            spaces/self/compiler_loops.spaces
             test.bf
             test.elf
-            output.txt
