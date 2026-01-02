@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# tools/gen_compiler_v2.py
-# Level 0.9: Unrolled Logic Compiler
+# tools/gen_compiler_v1.py
+# Level 0.9: Unrolled Logic Compiler (Fixed Indentation)
 #
 # Generates a Spaces program that:
 # 1. Emits ELF Header.
@@ -43,8 +43,7 @@ def emit_bytes(vals):
     for v in vals: emit_byte_tracked(v)
 
 def main():
-    # 1. ELF Header (Total Target: 300 bytes to be safe)
-    # We use a slightly larger size to accommodate the variable code length
+    # 1. ELF Header (Total Target: 300 bytes)
     total_size = 300
     load_addr = 0x400000
     header_len = 120
@@ -72,8 +71,7 @@ def main():
     emit_bytes([0x48, 0x31, 0xdb])
     
     # 2. Unrolled Logic (Repeat 64 times)
-    # We generate the Spaces code to read and process ONE character,
-    # and copy-paste this logic 64 times. No infinite loops.
+    # Reads input chars one by one and emits code.
     
     for _ in range(64):
         # Read char to C0
@@ -135,16 +133,14 @@ def main():
     # 4. Padding
     # Pad until C7 == 300
     right(7) # Move to counter
-    # Loop while C7 != 300? No, simply subtract 300, loop while non-zero add back and emit 0.
-    # Note: simple padding logic.
     dec(300)
     loop_open()
-       inc(300) # Restore
-       left(7)  # Go to emit pos
-       # Emit 0
-       right(8); clear(); out(); left(8); right(7); inc() # Manual emit 0 & inc C7
-       left(7)
-       right(7); dec(300) # Check again
+    inc(300) # Restore
+    left(7)  # Go to emit pos
+    # Emit 0
+    right(8); clear(); out(); left(8); right(7); inc() # Manual emit 0 & inc C7
+    left(7)
+    right(7); dec(300) # Check again
     loop_close()
     
     # Done
