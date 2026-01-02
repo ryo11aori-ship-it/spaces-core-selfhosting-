@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_full.py
-# Level 1.7: Full Brainfuck Compiler (Interleaved Buffer Strategy)
-# Fix: Uses [Flag, Data] pairs to handle binary zero safely.
-#      Prevents 'Tape pointer underflow' and huge output files.
+# Level 1.7: Full Brainfuck Compiler (Interleaved Buffer + Safe Flush)
+# Fix 1: Added Sentinel (255) at C99 to allow returning to C0 after flushing.
+# Fix 2: Padding is now strictly enforced to exceed p_filesz to prevent truncation segfaults.
 
 import sys
 
@@ -24,11 +24,12 @@ def clear(): loop_open(); dec(); loop_close()
 # C0: Input Char
 # C1-C6: Scratch
 # C7: Output Byte Counter
-# C98: Wall (Always 0) - Stop marker for scanning left
+# C98: Wall (0)
+# C99: Sentinel (255) - Marker to find way back
 # C100+: Buffer [Flag, Data, Flag, Data...]
-#        Flag=1 (Present), Flag=0 (End)
 
 WALL_POS = 98
+SENTINEL_POS = 99
 BUFFER_BASE = 100
 
 def emit_byte_tracked(val):
@@ -45,41 +46,36 @@ def copy_c0_to_c1():
     loop_open(); dec(); right(1); inc(); right(2); inc(); left(3); loop_close()
     right(3); loop_open(); dec(); left(3); inc(); right(3); loop_close(); left(3)
 
-# 安全なバッファ書き込み (Interleaved)
 def append_safe(vals):
     for v in vals:
-        # 1. Go to Buffer Base (C100)
+        # 1. Go to Buffer Base
         right(BUFFER_BASE)
-        
-        # 2. Scan Right [>>] (Skip Flag=1 cells)
-        loop_open()
-        right(2)
-        loop_close()
-        # Stops at Flag=0 (End of Buffer)
-        
+        # 2. Scan Right [>>] (Skip Flag=1)
+        loop_open(); right(2); loop_close()
         # 3. Write Data
-        inc() # Set Flag = 1
-        right(1) # Move to Data slot
+        inc() # Flag=1
+        right(1)
         clear()
         if v > 0: inc(v)
-        
         # 4. Ensure next Flag is 0
-        right(1) # Move to Next Flag
-        clear() # Ensure 0
-        
-        # 5. Return Home [<<]
-        # First, step back to current Flag (which is 1)
+        right(1); clear()
+        # 5. Return Home
+        # Step back to current Flag (1)
         left(2)
         # Loop back while Flag is 1
-        loop_open()
-        left(2)
-        loop_close()
-        # Stops at Wall (C98) which is 0
+        loop_open(); left(2); loop_close()
+        # Stops at Sentinel (C99) or Wall? 
+        # C99 is 255 (Non-zero). Wall C98 is 0.
+        # But Buffer starts at C100.
+        # The loop steps left(2).
+        # Even indices: 100, 102, ... are Flags.
+        # 100 -> 98. 98 is 0.
+        # So it stops at C98 (Wall).
         
         # 6. Back to C0
         left(WALL_POS)
         
-        # 7. Increment Total Counter C8 (Optional, kept for consistency)
+        # 7. Increment Total Counter C8 (Optional)
         right(8); inc(); left(8)
 
 def check_char(char_code, logic_func):
@@ -90,7 +86,10 @@ def check_char(char_code, logic_func):
     right(2); loop_open(); left(3); logic_func(); right(3); clear(); loop_close(); left(3)
 
 def main():
-    total_size = 1000
+    # Target File Size
+    target_file_size = 500 # Valid p_filesz
+    
+    total_size = 1000 # Buffer padding size
     load_addr = 0x400000
     header_len = 120
     
@@ -106,18 +105,18 @@ def main():
     prog_header = [
         0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00,
         *p64(0), *p64(load_addr), *p64(load_addr),
-        *p64(total_size), 
-        *p64(0x10000), 
+        *p64(target_file_size), # p_filesz
+        *p64(0x10000),          # p_memsz (64KB)
         *p64(0x1000)
     ]
     
     emit_bytes(header + prog_header)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
 
-    # Init Wall (C98 = 0)
-    right(WALL_POS); clear(); left(WALL_POS)
+    # Init Wall (C98=0) and Sentinel (C99=255)
+    right(WALL_POS); clear(); right(); inc(255); left(SENTINEL_POS)
     
-    # Init Buffer Start (C100 = 0)
+    # Init Buffer Start (C100=0)
     right(BUFFER_BASE); clear(); left(BUFFER_BASE)
 
     # Main Loop
@@ -158,54 +157,37 @@ def main():
     
     # Flush Buffer
     right(BUFFER_BASE)
-    loop_open()
-    # At Flag=1.
+    loop_open() # Loop while Flag=1
     right(1)
-    # At Data. Output.
-    out()
-    right(1)
-    # At Next Flag. Loop checks this.
+    out() # Emit Data
+    right(1) # Move to next Flag
     loop_close()
     
-    # End Flush. Back to C0? 
-    # Not strictly needed since we exit, but good hygiene.
+    # We are now at the End of Buffer (Flag=0).
+    # We need to return to C0 to allow emit_bytes to work correctly.
+    # We scan LEFT looking for Sentinel (255) at C99.
+    # Since Data can be anything, we must be careful.
+    # But we are stepping left(2) scanning Flags.
+    # Flags are 1. Wall is 0.
+    # Wait, simple scan left for 0? No, wall is 0.
+    # But Buffer End is 0 too.
+    # We are AT Buffer End (Flag=0).
+    # Step Left(2). If Flag=1, continue.
+    # If Flag=0 (Wall), stop.
     
-    # Padding
-    # We are deep in the buffer.
-    # Just emit 0s to stdout directly?
-    # No, C7 is valid counter.
-    # But C7 is far away.
-    # Let's just output some zeros and exit. The ELF parser is robust.
-    # Or, we can blindly output 500 zeros.
-    clear() # Clear current cell
-    inc(200) # Loop 200
-    loop_open()
-    out() # Emit 0 (current cell is used as counter, need another 0?)
-    # Hack: emit 0 from neighbor
-    right(1); clear(); out(); left(1)
-    dec()
-    loop_close()
+    left(2)
+    loop_open(); left(2); loop_close()
+    # Now at C98 (Wall).
+    
+    # Back to C0
+    left(WALL_POS)
 
-    # Exit Syscall (Streamed at the end)
-    # Wait, we flushed BEFORE exit?
-    # Yes. The buffer contains the program body.
-    # Exit syscall should be appended?
-    # The previous logic appended Exit to the Stream, NOT the buffer.
-    # So: Header -> [Buffer Content] -> Exit Code.
-    
-    # Need to verify if Buffer Content ends cleanly.
-    # Yes.
-    
-    # Stream Exit Code
-    # Move head to scratch area to emit safely
-    # We are deep in buffer.
-    # Just use current pos.
+    # Exit Syscall
     emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
     
-    # Padding logic was streamed.
-    # Just emit more zeros.
-    # We don't need precise C7 logic if we just pad "enough".
-    emit_bytes([0] * 100) 
+    # Massive Padding to ensure FileSize > p_filesz (500)
+    # Just emit 1000 zeros.
+    emit_bytes([0] * 1000)
 
 if __name__ == "__main__":
     main()
