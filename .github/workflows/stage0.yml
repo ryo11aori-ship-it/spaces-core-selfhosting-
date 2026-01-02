@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage13-compiler-v1:
+  stage14-compiler-v2:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,24 +17,26 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler V1
+      - name: Generate Compiler V2 (Unrolled Logic)
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
+          python3 tools/gen_compiler_v2.py > spaces/self/compiler_v2.spaces
 
       - name: Prepare Test Source
         run: |
-          echo -n "+++++" > test.bf
+          # テスト: ++- (1 + 1 - 1 = 1)
+          # これが正しく計算されれば、入力を読んで処理している証明になります。
+          echo -n "++-" > test.bf
 
       - name: Compile test.bf
         run: |
-          # timeoutコマンドで最大10秒に制限
-          # もし無限ループなら強制終了される（が、コード修正済なので成功するはず）
-          timeout 10s ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
+          # 実行。コンパイラは test.bf を読み、計算ロジックを出力します。
+          timeout 15s ./bin/ref_vm spaces/self/compiler_v2.spaces < test.bf > test.elf
 
       - name: Verify Compiled Binary
         run: |
           chmod +x test.elf
+          ls -l test.elf
           
           echo "Running compiled binary..."
           
@@ -45,19 +47,20 @@ jobs:
 
           echo "Exit Code: $ACTUAL_CODE"
 
-          if [ "$ACTUAL_CODE" -eq 5 ]; then
-            echo "🎉 SUCCESS: The compiler translated '+++++' into functional machine code!"
+          # 判定: ++- なので 1 になるはず
+          if [ "$ACTUAL_CODE" -eq 1 ]; then
+            echo "🎉 SUCCESS: The compiler processed '++-' correctly!"
           else
-            echo "❌ FAILED: Exit code mismatch."
-            echo "Expected: 5, Got: $ACTUAL_CODE"
+            echo "❌ FAILED: Logic check failed."
+            echo "Expected: 1, Got: $ACTUAL_CODE"
             exit 1
           fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-v1-outputs
+          name: compiler-v2-outputs
           path: |
-            spaces/self/compiler_v1.spaces
+            spaces/self/compiler_v2.spaces
             test.bf
             test.elf
