@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.8: Full Brainfuck Compiler with Loops
-# Fix: Add initial pointer headroom to avoid tape-pointer underflow.
-#       Keep previously applied relative-move fixes.
+# Level 1.9: Full BF Compiler with Long Jumps (32-bit offsets)
+# Fix: Replaced Short Jumps (EB/74) with Long Jumps (E9/0F84) to handle large loops in self-hosting.
+#      Implemented 32-bit Little Endian Patching logic in raw Spaces.
 
 import sys
 
@@ -20,23 +20,18 @@ def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
-# Memory Layout
 WALL_POS = 98
 BUFFER_BASE = 100
 TOKEN_WALL_POS = 298
 TOKEN_BASE = 300
-
-# small helper: number of cells between token base and token wall
-TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS  # expected 2
-
-def emit_byte_tracked(val):
-    right(8); clear()
-    if val > 0: inc(val)
-    out(); clear(); left(8)
-    right(7); inc(); left(7)
+TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS
 
 def emit_bytes(vals):
-    for v in vals: emit_byte_tracked(v)
+    for v in vals:
+        right(8); clear()
+        if v > 0: inc(v)
+        out(); clear(); left(8)
+        right(7); inc(); left(7)
 
 def copy_c0_to_c1():
     right(1); clear(); right(2); clear(); left(3)
@@ -54,71 +49,95 @@ def append_safe(vals):
         left(2); loop_open(); left(2); loop_close()
         left(WALL_POS); right(8); inc(); left(8)
 
+def append_from_c5():
+    right(BUFFER_BASE)
+    loop_open(); right(2); loop_close()
+    inc()
+    right(1); clear()
+    left(BUFFER_BASE+1); right(5)
+    loop_open(); dec(); left(5); left(WALL_POS); right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(); inc(); left(); loop_open(); left(2); loop_close(); left(BUFFER_BASE); right(WALL_POS); right(5)
+    loop_close()
+    left(5)
+    right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(2); clear(); left(2); loop_open(); left(2); loop_close(); left(WALL_POS); right(8); inc(); left(8)
+
 def compile_bracket_open():
-    append_safe([0x80, 0x3b, 0x00])
-    append_safe([0x74, 0x00])
     right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
     right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
-    right(40); dec(); left(40)
+    append_safe([0x80, 0x3b, 0x00])
+    append_safe([0x0f, 0x84, 0x00, 0x00, 0x00, 0x00])
 
 def compile_bracket_close():
+    append_safe([0xe9])
+    right(8); loop_open(); dec(); left(7); inc(); right(1); inc(); left(2); loop_close()
+    right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
+    right(1); inc(5); left(1)
+    right(40); loop_open(); dec(); left(39); dec(); right(39); loop_close(); left(40)
+    right(2); clear(); right(1); clear(); right(1); clear(); inc(256); left(4)
+    right(1)
+    loop_open()
+    dec(); right(2); inc(); right(1); dec()
+    right(1); clear(); left(1); loop_open(); dec(); right(); inc(); left(); loop_close(); right(); loop_open(); dec(); left(); inc(); right(); loop_close(); left(1)
+    right(1); right(1); clear(); inc(); left(1); loop_open(); right(); clear(); left(); clear(); loop_close(); right()
+    loop_open(); left(2); inc(256); right(2); left(3); clear(); right(3); left(4); inc(); right(4); clear(); loop_close(); left(5)
+    loop_close()
+    left(1)
+    right(3); loop_open(); dec(); right(2); inc(); left(2); loop_close(); left(3)
+    right(5); right(1); clear(); inc(); left(1); loop_open(); right(); clear(); left(); clear(); loop_close(); right()
+    left(1)
+    right(2); inc(256); left(2)
+    loop_open(); dec(); right(2); dec(); left(2); loop_close()
+    right(1); loop_open(); right(1); clear(); left(1); dec(); loop_close(); left(1)
+    right(2); loop_open(); dec(); right(2); inc(); left(2); loop_close(); left(2)
+    right(4); loop_open(); dec(); left(2); inc(); right(2); loop_close(); left(4)
+    right(8); inc(255); left(8)
+    right(4); loop_open(); dec(); right(4); dec(); left(4); loop_close(); left(4)
+    right(6); loop_open(); dec(); right(2); inc(); left(2); loop_close(); left(6)
+    right(7); loop_open(); dec(); left(2); inc(); right(2); loop_close(); left(7)
+    append_from_c5()
+    right(8); loop_open(); dec(); left(3); inc(); right(3); loop_close(); left(8)
+    append_from_c5()
+    append_safe([255, 255])
     right(8); loop_open(); dec(); left(7); inc(); right(1); inc(); left(2); loop_close()
     right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
     right(40); loop_open(); dec(); left(39); dec(); right(39); loop_close(); left(40)
-    right(1); inc(2); left(1)
-    right(2); inc(256); left(2)
-    right(1); loop_open(); dec(); right(1); dec(); left(1); loop_close(); left(1)
-    append_safe([0xeb])
-    right(BUFFER_BASE); loop_open(); right(2); loop_close(); inc(); right(1); clear()
-    left(BUFFER_BASE + 2); right(2)
-    loop_open(); dec(); left(2); right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(); inc(); left(); loop_open(); left(2); loop_close(); left(BUFFER_BASE); right(2); loop_close()
-    left(2)
-    right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(1); clear(); left(2); loop_open(); left(2); loop_close(); left(WALL_POS); right(8); inc(); left(8)
-    patch_c40_with_diff()
+    right(1); dec(9); left(1)
+    right(1); loop_open(); dec(); right(4); inc(); left(4); loop_close(); left(1)
+    right(40); loop_open(); dec(); left(34); inc(); right(34); loop_close(); left(40)
+    right(1); loop_open(); dec(); left(1); inc(); right(40); inc(); left(40); loop_close(); left(1)
+    right(6); inc(5); left(6)
+    right(5)
+    right(3); clear(); right(1); clear(); right(1); clear(); inc(256); left(5)
+    loop_open()
+    dec(); right(3); inc(); right(1); dec()
+    right(1); clear(); left(1); loop_open(); dec(); right(); inc(); left(); loop_close(); right(); loop_open(); dec(); left(); inc(); right(); loop_close(); left(1)
+    right(1); right(1); clear(); inc(); left(1); loop_open(); right(); clear(); left(); clear(); loop_close(); right()
+    loop_open(); left(2); inc(256); right(2); left(3); clear(); right(3); left(4); inc(); right(4); clear(); loop_close(); left(5)
+    loop_close()
+    left(2); loop_open(); dec(); right(2); inc(); left(2); loop_close(); right(2)
+    patch_at_c6_with_c5()
+    right(6); inc(); left(6)
+    right(2); loop_open(); dec(); right(3); inc(); left(3); loop_close(); left(2)
+    patch_at_c6_with_c5()
+    right(6); inc(); left(6); patch_at_c6_with_c5()
+    right(6); inc(); left(6); patch_at_c6_with_c5()
 
-def patch_c40_with_diff():
-    # 1. Calculate Diff (C3)
-    right(8); loop_open(); dec(); left(5); inc(); right(5); loop_close(); left(8)
-    right(1); loop_open(); dec(); left(1); inc(); right(8); inc(); left(8); loop_close(); left(1)
-    right(40); loop_open(); dec(); left(37); dec(); right(37); loop_close(); left(40)
-    right(3); dec(); left(3)
-    
-    # 2. Place Token at token track
+def patch_at_c6_with_c5():
     right(TOKEN_BASE); inc(); left(TOKEN_BASE)
-    
-    # 3. Move Token Right C40 times (marker movement)
-    right(40); loop_open(); dec(); left(40)
+    right(6); loop_open(); dec(); left(6)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
-    right(40); loop_close(); left(40)
-    
-    # 4. Find Token and clear target
+    right(6); loop_close(); left(6)
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
-    left(199)
-    clear() # Clear Target
-    
-    # 5. Return to Token before going Home
-    right(199)
-    # SAFETY: instead of large absolute left to token wall, move only TOKEN_DELTA (small, safe)
-    left(TOKEN_DELTA)
-    
-    # 6. Move C3 (Diff) to C4
-    right(3); loop_open(); dec(); right(1); inc(); left(1); loop_close(); left(3)
-    
-    # 7. Add C4 to Target (safe relative moves)
-    right(TOKEN_BASE); loop_open(); right(2); loop_close()
-    left(199) # go to target
-    # go back to C4 via safe relative path
-    right(199)
-    left(TOKEN_DELTA)
-    right(4)
+    left(199); clear()
+    right(199); left(TOKEN_DELTA)
+    right(5); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(5)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
+    right(199); left(TOKEN_DELTA); right(4)
     loop_open()
     dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
     inc()
-    right(199); loop_open(); left(2); loop_close(); left(TOKEN_DELTA); right(4)
+    right(199); left(TOKEN_DELTA); right(4)
     loop_close()
     left(4)
-    
-    # 8. Clear Token (safe)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
 
 def check_char(char_code, logic_func):
@@ -130,7 +149,7 @@ def check_char(char_code, logic_func):
 
 def main():
     target_file_size = 500
-    total_size = 1000
+    total_size = 2000
     load_addr = 0x400000
     header_len = 120
     def p64(v): return list(v.to_bytes(8, "little"))
@@ -147,14 +166,7 @@ def main():
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
     emit_bytes(header + prog_header)
-
-    # === SAFETY: allocate headroom so no left(...) will underflow ===
-    # Move the pointer well to the right at program start. All subsequent
-    # left(...) operations will then be offset from this safe baseline.
-    # 1000 is chosen conservatively; adjust if your VM tape is smaller.
     right(1000)
-
-    # original setup (relative to the above pointer)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
     right(WALL_POS); clear(); right(); inc(255); left(100)
     right(TOKEN_WALL_POS); clear(); left(TOKEN_WALL_POS)
