@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
 # Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fix: Cleared scratch registers (C1) before copying logic to prevent data corruption.
+# Fix: REMOVED erroneous 'break' (dec C2) inside match handlers.
+#      Now correctly processes all input characters instead of quitting after the first one.
 
 import sys
 
@@ -24,23 +25,17 @@ def loop_start(): emit(F+F+S)
 def loop_end(): emit(F+F+F)
 def clear(): loop_start(); dec(); loop_end()
 
-# --- Tracked Output System ---
+# --- Simplified Tracked Output (1 Byte Only) ---
 # C0: Working Cursor
-# C7: Byte Counter
-# C8: High Byte Counter
-# C9: Scratch
+# C7: Byte Counter (Max 255)
 
 def emit_byte_tracked(val):
     # Output byte
     right(9); clear(); inc(val); out(); clear(); left(9)
     # Increment Counter (C7)
-    right(7); inc()
-    # Check Overflow C7 (256 -> 0)
-    # Use C9 as check buffer
-    right(2); clear(); left(2); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
-    # If C9==0, increment C8. Use C1 as flag.
-    left(9); right(); clear(); inc(); right(8); loop_start(); left(8); clear(); right(8); clear(); loop_end()
-    left(8); loop_start(); clear(); right(7); inc(); left(7); loop_end(); left()
+    right(7); inc(); left(7)
+    # Return to C0
+    left() # Back to C0
 
 def emit_machine_code_tracked(bytes_list):
     for b in bytes_list: emit_byte_tracked(b)
@@ -77,7 +72,7 @@ def main():
     inp()
     
     # Check EOF (0)
-    # [FIX] Clear C1 before using it as scratch
+    # Clear C1 before use
     right(); clear(); left()
     
     # Copy C0->C3
@@ -90,25 +85,53 @@ def main():
     # Check '+' (43)
     right(2); loop_start(); left(2) # If C2 is active
     
-    # [FIX] Clear C1 before copy!
+    # Clear C1
     right(); clear(); left()
     
+    # Copy C0->C3 (Using C1 as scratch in process)
+    # Note: Copy logic uses C1(Right) and C3(Right(3)). 
+    # Current Pos: C0. 
+    # right(3) -> C3. left(3) -> C0.
+    # Logic: loop C0 { dec C0; inc C1; inc C3 } -> Moves C0 to C1,C3.
+    # Restore C0 from C3.
     right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+    
+    # Check if C1 == 43
     right(); dec(43); right(2); clear(); inc(); left(2); loop_start(); right(2); clear(); left(2); clear(); loop_end()
+    
     # If Match (+), Emit "inc rbx" (48 ff c3)
-    right(2); loop_start(); clear(); left(3); emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3); right(3); left(3); clear(); right(3); left(); dec(); right(); loop_end(); left(3)
+    # We are at C3 (Match Flag).
+    right(2); loop_start()
+        clear() # Clear Flag
+        left(3) # Go to C0 (Cursor)
+        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
+        right(3) # Back to C3
+        # [FIX] Do NOT decrement C2 here! We want to continue reading.
+    loop_end(); left(3)
+    
     right(2); loop_end(); left(2)
 
     # Check '-' (45)
     right(2); loop_start(); left(2) # If C2 is active
     
-    # [FIX] Clear C1 before copy!
+    # Clear C1
     right(); clear(); left()
 
+    # Copy C0->C3
     right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
+    
+    # Check if C1 == 45
     right(); dec(45); right(2); clear(); inc(); left(2); loop_start(); right(2); clear(); left(2); clear(); loop_end()
+    
     # If Match (-), Emit "dec rbx" (48 ff cb)
-    right(2); loop_start(); clear(); left(3); emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb); right(3); left(3); clear(); right(3); left(); dec(); right(); loop_end(); left(3)
+    right(2); loop_start()
+        clear()
+        left(3)
+        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
+        right(3)
+        # [FIX] Do NOT decrement C2 here!
+    loop_end(); left(3)
+    
     right(2); loop_end(); left(2)
 
     right(2); loop_end(); left(2) # End Main Loop
