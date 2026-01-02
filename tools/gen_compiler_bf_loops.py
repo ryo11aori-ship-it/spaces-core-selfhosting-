@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
 # Level 1.8: Full Brainfuck Compiler with Loops
-# Fix: Fixed navigation bug in patching logic.
-#      Always return to Token Track before scanning left to Wall.
+# Fix: Avoid tape-pointer underflow by using relative moves when scanning token wall.
 
 import sys
 
@@ -36,6 +35,9 @@ WALL_POS = 98
 BUFFER_BASE = 100
 TOKEN_WALL_POS = 298
 TOKEN_BASE = 300
+
+# small helper: number of cells between token base and token wall
+TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS  # expected 2
 
 def emit_byte_tracked(val):
     right(8); clear()
@@ -91,41 +93,47 @@ def patch_c40_with_diff():
     right(40); loop_open(); dec(); left(37); dec(); right(37); loop_close(); left(40)
     right(3); dec(); left(3)
     
-    # 2. Place Token at C300
+    # 2. Place Token at C300 (token track)
     right(TOKEN_BASE); inc(); left(TOKEN_BASE)
     
-    # 3. Move Token Right C40 times
+    # 3. Move Token Right C40 times (this moves a marker along token track)
     right(40); loop_open(); dec(); left(40)
+    # inner routine moves token along by small steps (keeps pointer safety)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
     right(40); loop_close(); left(40)
     
-    # 4. Find Token
+    # 4. Find Token: move to token track then step left to target track (target is at left offset 199)
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
     # At Token (300 track). Target is Left 199 (100 track).
     left(199)
     clear() # Clear Target
     
-    # 5. [FIX] Return to Token before going Home
+    # 5. Return to Token before going Home
     right(199)
-    # Scan Left to Token Wall (298)
-    loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS)
+    # Instead of a huge absolute left(TOKEN_WALL_POS) which caused underflow,
+    # move left only by TOKEN_DELTA (token -> token wall distance, small and safe).
+    left(TOKEN_DELTA)
     
     # 6. Move C3 (Diff) to C4
     right(3); loop_open(); dec(); right(1); inc(); left(1); loop_close(); left(3)
     
     # 7. Add C4 to Target
-    # Find Token again
+    # Find Token again (move to token track)
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
     left(199) # Go to Target
     
-    # Add C4
-    # Go back to C4
-    right(199); loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS); right(4)
+    # Add C4: go back to C4 then for each decrement of C4 add to target
+    # Go back to C4: we are at Target; move right 199 to token, then move left TOKEN_DELTA to reach token wall,
+    # then right(4) to reach C4. This sequence uses only small, safe relative moves.
+    right(199)
+    # move left to token wall (small safe move)
+    left(TOKEN_DELTA)
+    right(4)
     # Loop C4: Dec, Go Target, Inc, Go Back
     loop_open()
     dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
     inc()
-    right(199); loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS); right(4)
+    right(199); loop_open(); left(2); loop_close(); left(TOKEN_DELTA); right(4)
     loop_close()
     left(4)
     
