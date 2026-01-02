@@ -1,58 +1,57 @@
 #!/usr/bin/env python3
-# tools/gen_compiler_v1.py
-# Pragmatic patch: generate a .spaces program (no loop tokens) that outputs
-# a minimal ELF which immediately exits with code 5.
+# tools/gen_compiler_v2.py
+# Level 0.9: Unrolled Logic Compiler
 #
-# WARNING: This is NOT a general BF->ELF compiler. It exists so your CI test
-# (which uses test.bf = "+++++") will observe test.elf exiting with code 5.
-#
-# Usage in CI (same as before):
-#   python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
-#
+# Generates a Spaces program that:
+# 1. Emits ELF Header.
+# 2. Repeats 64 times: Read char -> If '+' emit inc -> If '-' emit dec.
+# 3. Emits Exit syscall.
+# 4. Pads to target size dynamically.
+
 import sys
 
-# Tokens used by the esolang / VM
-S = " "         # ASCII half-width space
-F = "\u3000"    # full-width space (U+3000)
+# --- Spaces Ops ---
+S = " "
+F = "\u3000"
 
-def emit_chunk(s):
-    # Put a newline separator between logical chunks to avoid accidental token merging.
-    # VM ignores newlines.
-    sys.stdout.write(s + "\n")
+def emit(s): sys.stdout.write(s + "\n")
+def right(n=1): emit((S+S+S)*n)
+def left(n=1): emit((S+S+F)*n)
+def inc(n=1): emit((S+F+S)*n)
+def dec(n=1): emit((S+F+F)*n)
+def out(): emit(F+S+S)
+def inp(): emit(F+S+F)
+def loop_open(): emit(F+F+S)
+def loop_close(): emit(F+F+F)
+def clear(): loop_open(); dec(); loop_close()
 
-def right(n=1):
-    emit_chunk((S+S+S)*n)
+# --- Memory Layout ---
+# C0: Input Buffer / Cursor
+# C1: Scratch
+# C2: Scratch
+# C3: Match Flag
+# C7: Output Byte Counter
 
-def left(n=1):
-    emit_chunk((S+S+F)*n)
+def emit_byte_tracked(val):
+    # Emit byte val and increment C7
+    # Temp move to C8 to emit
+    right(8); clear(); inc(val); out(); clear(); left(8)
+    # Inc Counter C7
+    right(7); inc(); left(7)
 
-def inc(n=1):
-    # (S + F + S) repeated n times sets current cell += n
-    if n <= 0:
-        return
-    emit_chunk((S+F+S)*n)
+def emit_bytes(vals):
+    for v in vals: emit_byte_tracked(v)
 
-def dec(n=1):
-    if n <= 0:
-        return
-    emit_chunk((S+F+F)*n)
+def main():
+    # 1. ELF Header (Total Target: 300 bytes to be safe)
+    # We use a slightly larger size to accommodate the variable code length
+    total_size = 300
+    load_addr = 0x400000
+    header_len = 120
+    
+    def p64(v): return list(v.to_bytes(8, "little"))
+    def p32(v): return list(v.to_bytes(4, "little"))
 
-def out():
-    emit_chunk(F+S+S)
-
-def inp():
-    emit_chunk(F+S+F)
-
-# Helpers to build ELF bytes
-def p64(v):
-    return list(v.to_bytes(8, "little"))
-
-def p32(v):
-    return list(v.to_bytes(4, "little"))
-
-def build_minimal_exit_elf(exit_code=5, total_size=200, load_addr=0x400000, header_len=120):
-    # ELF header + program header (modeled on previous generator), then code:
-    # mov edi, imm32; mov eax, 60; syscall
     header = [
         0x7f,0x45,0x4c,0x46,0x02,0x01,0x01,0x00,0,0,0,0,0,0,0,0,
         0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00,
@@ -64,36 +63,91 @@ def build_minimal_exit_elf(exit_code=5, total_size=200, load_addr=0x400000, head
         *p64(0), *p64(load_addr), *p64(load_addr),
         *p64(total_size), *p64(total_size), *p64(0x1000)
     ]
-    # code: mov edi, imm32; mov eax, 60; syscall
-    code = bytes([0xBF, exit_code & 0xff, (exit_code>>8)&0xff, (exit_code>>16)&0xff, (exit_code>>24)&0xff,
-                  0xB8, 0x3C, 0x00, 0x00, 0x00,
-                  0x0F, 0x05])
-    elf = bytes(header + prog_header) + code
-    if len(elf) < total_size:
-        elf = elf + bytes(total_size - len(elf))
-    return elf
+    
+    # Initialize Logic
+    right(10) # Safety margin
+    emit_bytes(header + prog_header)
+    
+    # Init Code: xor rbx, rbx (48 31 db)
+    emit_bytes([0x48, 0x31, 0xdb])
+    
+    # 2. Unrolled Logic (Repeat 64 times)
+    # We generate the Spaces code to read and process ONE character,
+    # and copy-paste this logic 64 times. No infinite loops.
+    
+    for _ in range(64):
+        # Read char to C0
+        clear(); inp()
+        
+        # --- Check '+' (43) ---
+        # Copy C0 -> C1
+        right(1); clear(); left(1)
+        loop_open(); dec(); right(); inc(); right(); inc(); left(2); loop_close()
+        right(2); loop_open(); left(2); inc(); right(2); dec(); loop_close(); left(2)
+        
+        # Sub 43 from C1
+        right(); dec(43)
+        
+        # Is C1 Zero? (If Zero, C3 = 1)
+        right(2); clear(); inc(); left(2) # C3=1
+        loop_open(); right(2); clear(); left(2); clear(); loop_close() # If C1!=0, C3=0
+        
+        # If Match (C3==1), Emit `inc rbx`
+        right(2)
+        loop_open()
+        # Emit logic inside loop (runs once)
+        left(3) # Back to C0 relative
+        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
+        right(3) # Back to C3
+        clear() # clear flag
+        loop_close()
+        left(2) # Back to C1
+        left()  # Back to C0
 
-def main():
-    # Build ELF that exits(5)
-    elf = build_minimal_exit_elf(exit_code=5, total_size=200)
+        # --- Check '-' (45) ---
+        # Copy C0 -> C1
+        right(1); clear(); left(1)
+        loop_open(); dec(); right(); inc(); right(); inc(); left(2); loop_close()
+        right(2); loop_open(); left(2); inc(); right(2); dec(); loop_close(); left(2)
+        
+        # Sub 45 from C1
+        right(); dec(45)
+        
+        # Is C1 Zero?
+        right(2); clear(); inc(); left(2)
+        loop_open(); right(2); clear(); left(2); clear(); loop_close()
+        
+        # If Match, Emit `dec rbx`
+        right(2)
+        loop_open()
+        left(3)
+        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
+        right(3)
+        clear()
+        loop_close()
+        left(2)
+        left() # Back to C0
 
-    # Emit a .spaces program that outputs each byte in sequence without using any loop tokens.
-    # Pattern for each byte:
-    #   inc(byte)  ; increments current cell from 0 -> byte
-    #   out()      ; output byte
-    #   right()    ; move to next cell
-    #
-    # We rely on each new cell being zero-initialized, so we never need to "clear" via loops.
-    for i, b in enumerate(elf):
-        if b == 0:
-            # output zero directly (cell is zero)
-            out()
-        else:
-            inc(b)
-            out()
-        # move to next cell except after last byte
-        if i != len(elf) - 1:
-            right(1)
+    # 3. Exit Code
+    # mov edi, ebx; mov eax, 60; syscall
+    emit_bytes([0x89, 0xdf, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
+    
+    # 4. Padding
+    # Pad until C7 == 300
+    right(7) # Move to counter
+    # Loop while C7 != 300? No, simply subtract 300, loop while non-zero add back and emit 0.
+    # Note: simple padding logic.
+    dec(300)
+    loop_open()
+       inc(300) # Restore
+       left(7)  # Go to emit pos
+       # Emit 0
+       right(8); clear(); out(); left(8); right(7); inc() # Manual emit 0 & inc C7
+       left(7)
+       right(7); dec(300) # Check again
+    loop_close()
+    
+    # Done
 
 if __name__ == "__main__":
     main()
