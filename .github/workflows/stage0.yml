@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage16-compiler-bf-basic:
+  stage17-compiler-bf-full:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,37 +17,35 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (BF Basic)
+      - name: Generate Compiler (BF Full - Buffered)
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_compiler_bf_basic.py > spaces/self/compiler_basic.spaces
+          # ここを修正！ full.py を使います
+          python3 tools/gen_compiler_bf_full.py > spaces/self/compiler_full.spaces
 
       - name: Prepare Test Source (Echo + Increment)
         run: |
-          # ソースコード: 1文字読んで(,), インクリメントして(+), 出力する(.)
+          # バッファリングが正しく動くか、まずは ,+. でテスト
           echo -n ",+." > test.bf
-          
-          # 入力データ: 'A' (ASCII 65)
           echo -n "A" > input.txt
 
       - name: Compile test.bf
         run: |
-          # コンパイル実行
-          timeout 15s ./bin/ref_vm spaces/self/compiler_basic.spaces < test.bf > test.elf
+          # コンパイル（バッファリング処理が入るので少し時間がかかるかも）
+          timeout 30s ./bin/ref_vm spaces/self/compiler_full.spaces < test.bf > test.elf
           chmod +x test.elf
 
       - name: Verify Compiled Binary
         run: |
           echo "Running compiled binary..."
           
-          # 実行: A を入力 -> B が出るはず
+          # A -> B
           ./test.elf < input.txt > output.txt
           
           cat output.txt
           
-          # 判定
           if grep -q "B" output.txt; then
-            echo "🎉 SUCCESS: 'A' became 'B'! The compiler supports I/O and Arithmetic!"
+            echo "🎉 SUCCESS: Buffered Compiler works! (I/O OK)"
           else
             echo "❌ FAILED: Output mismatch."
             od -t x1 output.txt
@@ -57,9 +55,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-basic-outputs
+          name: compiler-full-outputs
           path: |
-            spaces/self/compiler_basic.spaces
+            spaces/self/compiler_full.spaces
             test.bf
             test.elf
             output.txt
