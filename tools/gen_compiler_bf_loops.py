@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
 # Level 1.8: Full Brainfuck Compiler with Loops
-# Fix: FLATTENED ALL CODE to prevent IndentationError.
+# Fix: Corrected 'Return Home' distance in patching logic to prevent Tape Underflow.
+#      Initialized Wall at C298.
 
 import sys
 
@@ -25,14 +26,16 @@ def clear(): loop_open(); dec(); loop_close()
 # C7: Output Byte Counter
 # C8: Output Buffer Count
 # C40: Loop Start Index (Simple Stack for 1 level)
-# C98: Wall (0)
-# C99: Sentinel (255)
+# C98: Buffer Wall (0)
+# C99: Buffer Sentinel (255)
 # C100+: Buffer [Flag, Data]
+# C298: Token Wall (0)
 # C300+: Token Track
 
 WALL_POS = 98
 BUFFER_BASE = 100
-APPEND_TOKEN_BASE = 300
+TOKEN_WALL_POS = 298
+TOKEN_BASE = 300
 
 def emit_byte_tracked(val):
     right(8); clear()
@@ -82,27 +85,46 @@ def compile_bracket_close():
     patch_c40_with_diff()
 
 def patch_c40_with_diff():
+    # Calc Diff C3
     right(8); loop_open(); dec(); left(5); inc(); right(5); loop_close(); left(8)
     right(1); loop_open(); dec(); left(1); inc(); right(8); inc(); left(8); loop_close(); left(1)
     right(40); loop_open(); dec(); left(37); dec(); right(37); loop_close(); left(40)
     right(3); dec(); left(3)
-    left(1); right(300); inc(); left(300); right(1)
+    
+    # Place Token at C300
+    right(TOKEN_BASE); inc(); left(TOKEN_BASE)
+    
+    # Move Token Right C40 times
     right(40); loop_open(); dec(); left(40)
-    right(300); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(300)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
     right(40); loop_close(); left(40)
-    right(300); loop_open(); right(2); loop_close()
-    left(199); clear()
-    loop_open(); left(2); loop_close(); left(299)
+    
+    # Find Token
+    right(TOKEN_BASE); loop_open(); right(2); loop_close()
+    # At Token. Target is Left 200, Right 1. (Since 300-100=200). 
+    # But C100+2*Index+1 is the Data slot. C300+2*Index is Token.
+    left(199)
+    clear() # Clear old 00
+    
+    # Add Diff (C3)
+    # Go back to C0 (Using TOKEN_WALL_POS)
+    loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS)
+    # Move C3 to C4
     right(3); loop_open(); dec(); right(1); inc(); left(1); loop_close(); left(3)
-    right(300); loop_open(); right(2); loop_close(); left(199)
-    right(4)
+    # Move C4 to Target
+    # Find Token again
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
+    # Add C4
+    right(200); loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS); right(4)
     loop_open()
-    dec(); left(4); right(300); loop_open(); right(2); loop_close(); left(199)
+    dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
     inc()
-    loop_open(); left(2); loop_close(); left(299); right(4)
+    right(200); loop_open(); left(2); loop_close(); left(TOKEN_WALL_POS); right(4)
     loop_close()
     left(4)
-    right(300); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(300)
+    
+    # Clear Token
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
 
 def check_char(char_code, logic_func):
     copy_c0_to_c1()
@@ -131,8 +153,13 @@ def main():
     ]
     emit_bytes(header + prog_header)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
-    right(WALL_POS); clear(); right(); inc(255); left(100)
+    
+    # Init Walls and Sentinels
+    right(WALL_POS); clear(); right(); inc(255); left(100) # C98=0, C99=255
+    right(TOKEN_WALL_POS); clear(); left(TOKEN_WALL_POS) # C298=0
+    
     right(BUFFER_BASE); clear(); left(BUFFER_BASE)
+    
     right(2); clear(); inc(); left(2)
     right(2); loop_open(); left(2)
     clear(); inp()
@@ -149,9 +176,11 @@ def main():
     check_char(91, lambda: compile_bracket_open())
     check_char(93, lambda: compile_bracket_close())
     right(2); loop_close(); left(2)
+    
     right(BUFFER_BASE)
     loop_open(); right(1); out(); right(1); loop_close()
     left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
+    
     emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
     emit_bytes([0] * 1000)
 
