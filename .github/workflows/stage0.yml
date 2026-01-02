@@ -17,10 +17,11 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler V2 (Unrolled Logic)
+      - name: Generate Compiler (Level 0.9)
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_compiler_v2.py > spaces/self/compiler_v2.spaces
+          # ファイル名は v1.py のまま実行します
+          python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
 
       - name: Prepare Test Source
         run: |
@@ -31,7 +32,7 @@ jobs:
       - name: Compile test.bf
         run: |
           # 実行。コンパイラは test.bf を読み、計算ロジックを出力します。
-          timeout 15s ./bin/ref_vm spaces/self/compiler_v2.spaces < test.bf > test.elf
+          timeout 15s ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
 
       - name: Verify Compiled Binary
         run: |
@@ -59,8 +60,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-v2-outputs
+          name: compiler-outputs
           path: |
-            spaces/self/compiler_v2.spaces
+            spaces/self/compiler_v1.spaces
             test.bf
             test.elf
