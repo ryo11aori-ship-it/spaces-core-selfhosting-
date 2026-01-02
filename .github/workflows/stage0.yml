@@ -17,33 +17,27 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      # --- Level 0.8: BF to ELF Compiler (New) ---
       - name: Generate Compiler V1
         run: |
           mkdir -p spaces/self
-          # 1. コンパイラ（Spacesコード）を生成
           python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
 
       - name: Prepare Test Source
         run: |
-          # テスト用ソースコード: 5回インクリメントする
-          # これがコンパイルされると、終了コード 5 を返すバイナリになるはず
           echo -n "+++++" > test.bf
 
       - name: Compile test.bf
         run: |
-          # 2. Spacesコンパイラを実行
-          # コンパイラは test.bf を読み、機械語に翻訳して test.elf を出力する
-          ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
+          # timeoutコマンドで最大10秒に制限
+          # もし無限ループなら強制終了される（が、コード修正済なので成功するはず）
+          timeout 10s ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
 
       - name: Verify Compiled Binary
         run: |
-          # 3. 実行権限付与
           chmod +x test.elf
           
           echo "Running compiled binary..."
           
-          # 4. 実行して終了コードを確認
           set +e
           ./test.elf
           ACTUAL_CODE=$?
@@ -51,7 +45,6 @@ jobs:
 
           echo "Exit Code: $ACTUAL_CODE"
 
-          # 判定: ソースコードが "+" 5個なので、終了コードは 5 になるはず
           if [ "$ACTUAL_CODE" -eq 5 ]; then
             echo "🎉 SUCCESS: The compiler translated '+++++' into functional machine code!"
           else
