@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
 # Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fix: REMOVED erroneous 'break' (dec C2) inside match handlers.
-#      Now correctly processes all input characters instead of quitting after the first one.
+# Fix: Fixed Python IndentationError.
+#      Removed erroneous 'break' (dec C2) inside match handlers so it reads all input.
 
 import sys
 
@@ -88,12 +88,7 @@ def main():
     # Clear C1
     right(); clear(); left()
     
-    # Copy C0->C3 (Using C1 as scratch in process)
-    # Note: Copy logic uses C1(Right) and C3(Right(3)). 
-    # Current Pos: C0. 
-    # right(3) -> C3. left(3) -> C0.
-    # Logic: loop C0 { dec C0; inc C1; inc C3 } -> Moves C0 to C1,C3.
-    # Restore C0 from C3.
+    # Copy C0->C3
     right(3); clear(); left(3); loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end(); right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
     
     # Check if C1 == 43
@@ -102,11 +97,11 @@ def main():
     # If Match (+), Emit "inc rbx" (48 ff c3)
     # We are at C3 (Match Flag).
     right(2); loop_start()
-        clear() # Clear Flag
-        left(3) # Go to C0 (Cursor)
-        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
-        right(3) # Back to C3
-        # [FIX] Do NOT decrement C2 here! We want to continue reading.
+    clear() # Clear Flag
+    left(3) # Go to C0 (Cursor)
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
+    right(3) # Back to C3
+    # [FIXED] Removed 'dec C2' (break) here.
     loop_end(); left(3)
     
     right(2); loop_end(); left(2)
@@ -125,11 +120,11 @@ def main():
     
     # If Match (-), Emit "dec rbx" (48 ff cb)
     right(2); loop_start()
-        clear()
-        left(3)
-        emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
-        right(3)
-        # [FIX] Do NOT decrement C2 here!
+    clear()
+    left(3)
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
+    right(3)
+    # [FIXED] Removed 'dec C2' (break) here.
     loop_end(); left(3)
     
     right(2); loop_end(); left(2)
