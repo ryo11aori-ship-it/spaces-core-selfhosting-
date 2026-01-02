@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage18-compiler-bf-loops:
+  stage19-self-hosting-linear:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,34 +17,56 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (BF Loops)
+      # 1. 前回のコンパイラ(Spaces版)を復元
+      # ここでは再生成しますが、あなたの修正済みコードが必要です。
+      # gen_compiler_bf_loops.py はリポジトリにある前提で動きます。
+      - name: Regenerate Compiler (Loop Version)
         run: |
           mkdir -p spaces/self
           python3 tools/gen_compiler_bf_loops.py > spaces/self/compiler_loops.spaces
 
-      - name: Prepare Test Source (Simple Loop)
+      # 2. 今回の主役: BFで書かれたコンパイラソースを生成
+      - name: Generate Compiler Source (Brainfuck)
         run: |
-          # ++[-] : 2 increment, then loop dec until 0.
-          # If loop works, it finishes instantly.
-          echo -n "++[-]" > test.bf
+          python3 tools/gen_bf_source.py > spaces/self/compiler_linear.bf
 
-      - name: Compile test.bf
+      # 3. セルフホスティング: Spacesコンパイラで BFソースをコンパイル！
+      # これが成功すれば「コンパイラがコンパイラをコンパイルした」ことになる
+      - name: Compile BF Compiler using Spaces Compiler
         run: |
-          timeout 60s ./bin/ref_vm spaces/self/compiler_loops.spaces < test.bf > test.elf
-          chmod +x test.elf
+          echo "Compiling compiler_linear.bf ..."
+          timeout 60s ./bin/ref_vm spaces/self/compiler_loops.spaces < spaces/self/compiler_linear.bf > compiler_linear.elf
+          chmod +x compiler_linear.elf
+          ls -l compiler_linear.elf
 
-      - name: Verify Compiled Binary
+      # 4. 生まれたコンパイラでテストコードをコンパイル
+      - name: Test Self-Hosted Compiler
         run: |
-          echo "Running compiled binary..."
-          ./test.elf
-          echo "Run finished with code $?"
-          # If we are here, no segfault/timeout.
+          # ループなしのテスト (Linear compilerなので)
+          echo -n ",+." > test_linear.bf
+          echo -n "A" > input.txt
+          
+          echo "Compiling test_linear.bf using compiler_linear.elf ..."
+          ./compiler_linear.elf < test_linear.bf > test_linear.elf
+          chmod +x test_linear.elf
+          
+          echo "Running test..."
+          ./test_linear.elf < input.txt > output.txt
+          cat output.txt
+          
+          if grep -q "B" output.txt; then
+             echo "🎉 SUCCESS: Self-Hosting Cycle Complete (Linear)!"
+          else
+             echo "❌ FAILED: Output mismatch."
+             exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-loops-outputs
+          name: self-hosting-artifacts
           path: |
             spaces/self/compiler_loops.spaces
-            test.bf
-            test.elf
+            spaces/self/compiler_linear.bf
+            compiler_linear.elf
+            test_linear.elf
