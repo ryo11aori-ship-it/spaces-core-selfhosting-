@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage14-compiler-v2:
+  stage15-compiler-loop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,22 +17,23 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (Level 0.9)
+      - name: Generate Compiler (Loop Version)
         run: |
           mkdir -p spaces/self
-          # ファイル名は v1.py のまま実行します
-          python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
+          # 今回は新しい loop.py を使います
+          python3 tools/gen_compiler_loop.py > spaces/self/compiler_loop.spaces
 
       - name: Prepare Test Source
         run: |
-          # テスト: ++- (1 + 1 - 1 = 1)
-          # これが正しく計算されれば、入力を読んで処理している証明になります。
-          echo -n "++-" > test.bf
+          # テスト: + を10回。
+          # ループが正しく回れば、Exit Code 10 になるはずです。
+          echo -n "++++++++++" > test.bf
 
       - name: Compile test.bf
         run: |
           # 実行。コンパイラは test.bf を読み、計算ロジックを出力します。
-          timeout 15s ./bin/ref_vm spaces/self/compiler_v1.spaces < test.bf > test.elf
+          # 念のため timeout を入れておきます（無限ループ対策）
+          timeout 15s ./bin/ref_vm spaces/self/compiler_loop.spaces < test.bf > test.elf
 
       - name: Verify Compiled Binary
         run: |
@@ -48,20 +49,20 @@ jobs:
 
           echo "Exit Code: $ACTUAL_CODE"
 
-          # 判定: ++- なので 1 になるはず
-          if [ "$ACTUAL_CODE" -eq 1 ]; then
-            echo "🎉 SUCCESS: The compiler processed '++-' correctly!"
+          # 判定: + が10個なので 10
+          if [ "$ACTUAL_CODE" -eq 10 ]; then
+            echo "🎉 SUCCESS: The LOOP compiler works correctly!"
           else
-            echo "❌ FAILED: Logic check failed."
-            echo "Expected: 1, Got: $ACTUAL_CODE"
+            echo "❌ FAILED: Loop logic check failed."
+            echo "Expected: 10, Got: $ACTUAL_CODE"
             exit 1
           fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-outputs
+          name: compiler-loop-outputs
           path: |
-            spaces/self/compiler_v1.spaces
+            spaces/self/compiler_loop.spaces
             test.bf
             test.elf
