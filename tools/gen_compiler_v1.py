@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# tools/gen_compiler_v1.py
-# Spaces Compiler Generator (Level 0.8: BF to ELF Compiler)
+# tools/gen_compiler_v2.py
+# Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
 #
 # Logic:
-# 1. Emit ELF Header (4KB).
+# 1. Emit ELF Header (Fixed size: 200 bytes).
 # 2. Emit Init (xor rbx, rbx).
 # 3. Loop: Read char.
 #    - If 0 (EOF): Break.
 #    - If '+': Emit "inc rbx".
 #    - If '-': Emit "dec rbx".
+#    - Others: Ignore.
 # 4. Emit Exit Sequence.
-# 5. Pad to 4KB.
+# 5. Pad to exactly 200 bytes using simple 1-byte counter.
 
 import sys
 
@@ -33,34 +34,28 @@ def loop_start(): emit(F+F+S)
 def loop_end(): emit(F+F+F)
 def clear(): loop_start(); dec(); loop_end()
 
-# --- Tracked Output System ---
+# --- Simplified Tracked Output (1 Byte Only) ---
 # C0: Working Cursor
-# C7: Low Byte Counter
-# C8: High Byte Counter
-# C9: Scratch
+# C7: Byte Counter (Max 255)
 
 def emit_byte_tracked(val):
     # Output byte
     right(9); clear(); inc(val); out(); clear(); left(9)
     # Increment Counter (C7)
-    right(7); inc()
-    # Check Overflow C7 (256 -> 0)
-    # Use C9 as check buffer
-    right(2); clear(); left(2); loop_start(); right(2); inc(); left(2); dec(); loop_end(); right(2); loop_start(); left(2); inc(); right(2); dec(); loop_end()
-    # If C9==0, increment C8. Use C1 as flag.
-    left(9); right(); clear(); inc(); right(8); loop_start(); left(8); clear(); right(8); clear(); loop_end()
-    left(8); loop_start(); clear(); right(7); inc(); left(7); loop_end(); left()
+    right(7); inc(); left(7)
+    # Return to C0
+    left() # Back to C0
 
 def emit_machine_code_tracked(bytes_list):
     for b in bytes_list: emit_byte_tracked(b)
 
 def main():
-    right(16) # Safety margin
+    right(10) # Safety margin
 
-    # 1. Emit ELF Header (4KB)
+    # 1. Emit ELF Header (Target Total Size: 200 bytes)
     load_addr = 0x400000
     header_len = 120
-    total_size = 0x1000 # 4KB
+    total_size = 200 # 0xC8
     
     header = [
         0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00, 0,0,0,0,0,0,0,0,
@@ -115,12 +110,12 @@ def main():
     # mov edi, ebx; mov eax, 60; syscall
     emit_machine_code_tracked([0x89, 0xdf, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
 
-    # 5. Pad to 4KB (0x1000 = 16 * 256)
-    # Check C8. Loop until C8 == 16.
-    right(8); dec(16); loop_start(); inc(16); left(8); emit_byte_tracked(0); right(8); dec(16); loop_end(); inc(16); left(8)
+    # 5. Pad to 200 bytes (Simple 1-byte counter check)
+    # Target C7 == 200
+    right(7); dec(200); loop_start(); inc(200); left(7); emit_byte_tracked(0); right(7); dec(200); loop_end(); inc(200); left(7)
 
     sys.stdout.buffer.write("".join(CMDS).encode('utf-8'))
-    with open("bf_debug.log", "w") as f: f.write("Generated Compiler V1 (Simplified).\n")
+    with open("bf_debug.log", "w") as f: f.write("Generated Compiler V2 (Lightweight).\n")
 
 if __name__ == '__main__':
     main()
