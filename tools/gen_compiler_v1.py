@@ -1,30 +1,38 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
-# Spaces Compiler Generator — robust variant with explicit loop balancing counters.
-# - Emits a real '\n' after every logical emit to avoid accidental token merging.
-# - Tracks loop_start/loop_end calls in Python (ls_count/le_count).
-# - Appends missing loop_end tokens at EOF if ls_count > le_count.
+# Robust Spaces generator — guarantees balanced loop tokens by Python-side counting.
 #
-# Save this as tools/gen_compiler_v1.py and run:
+# Usage:
 #   python3 tools/gen_compiler_v1.py > spaces/self/compiler_v1.spaces
+#
+# After generation, verify:
+#   python3 - <<'PY'
+#   s = open('spaces/self/compiler_v1.spaces','r',encoding='utf-8').read()
+#   print("LS", s.count('\u3000\u3000 '), "LE", s.count('\u3000\u3000\u3000'))
+#   PY
+#
+# Then run your VM exactly as in CI.
 
 import sys
 
 def p64(val): return list(val.to_bytes(8, 'little'))
 def p32(val): return list(val.to_bytes(4, 'little'))
 
-S = " "         # half-width space
-F = "\u3000"    # full-width space used by this esolang
-CMDS = []
+# Symbols used by the esolang / vm
+S = " "         # ASCII half-width space
+F = "\u3000"    # full-width space (U+3000)
 
-# loop counters (track how many explicit loop_start/loop_end we emitted)
-ls_count = 0
-le_count = 0
+# We'll collect "chunks" and then join once at the end.
+CHUNKS = []
+
+# Python-side counters for loop tokens we intentionally emit
+LS_COUNT = 0
+LE_COUNT = 0
 
 def emit(s):
-    # Append a real newline after each logical emit to ensure no accidental merging
-    # between adjacent emits (newlines are ignored by the VM).
-    CMDS.append(s + '\n')
+    # Append a real newline between emitted logical chunks to avoid accidental boundary merging.
+    # The VM ignores newline characters, so these are safe separators.
+    CHUNKS.append(s + '\n')
 
 def right(n=1): emit((S+S+S)*n)
 def left(n=1): emit((S+S+F)*n)
@@ -34,28 +42,26 @@ def out(): emit(F+S+S)
 def inp(): emit(F+S+F)
 
 def loop_start():
-    global ls_count
-    ls_count += 1
+    global LS_COUNT
+    LS_COUNT += 1
     emit(F+F+S)
 
 def loop_end():
-    global le_count
-    le_count += 1
+    global LE_COUNT
+    LE_COUNT += 1
     emit(F+F+F)
 
-def clear(): 
-    # clear current cell: [ loop_start(); dec(); loop_end() ]
-    # keep using loop_start()/loop_end() so python counters remain accurate.
+def clear():
+    # clear cell: loop_start(); dec(); loop_end()
     loop_start()
     dec()
     loop_end()
 
-# --- Tracked byte-emission helpers ---
-# Uses C0 -> C9 trick for output then increments C7 counter.
+# helpers to emit machine bytes while tracking output-counter C7
 def emit_byte_tracked(val):
-    # Output byte (C0 -> C9 -> C0)
+    # pattern: move to C9, clear, inc(val), out, clear, move back
     right(9); clear(); inc(val); out(); clear(); left(9)
-    # Increment Counter C7 (C0 -> C7 -> C0)
+    # increment byte counter C7
     right(7); inc(); left(7)
 
 def emit_machine_code_tracked(bytes_list):
@@ -66,7 +72,7 @@ def main():
     # Safety margin
     right(16)
 
-    # 1. ELF header (minimal, target total_size 200)
+    # 1) ELF headers (target total size 200)
     load_addr = 0x400000
     header_len = 120
     total_size = 200
@@ -82,43 +88,43 @@ def main():
         *p64(0), *p64(load_addr), *p64(load_addr),
         *p64(total_size), *p64(total_size), *p64(0x1000)
     ]
-    for b in header + prog_header:
+    for b in (header + prog_header):
         emit_byte_tracked(b)
 
-    # 2. xor rbx, rbx
+    # 2) init code xor rbx, rbx
     emit_machine_code_tracked([0x48, 0x31, 0xdb])
 
-    # 3. Main Loop
-    # C2 is main loop flag
+    # 3) Main loop start (C2 = 1)
     right(2); clear(); inc(); loop_start(); left(2)
 
-    # [STEP1] read input into C0
+    # STEP 1: read input (into C0)
     clear()
     inp()
 
-    # [STEP2] EOF check: copy C0 -> C1 & C3; check preserved copy in C1
-    right(); clear(); left()            # clear C1
+    # STEP 2: EOF check
+    # Clear C1
+    right(); clear(); left()
 
-    # copy C0 -> C1 & C3 (transient)
+    # Copy C0 -> C1 & C3 (transient via loops)
     right(3); clear(); left(3)
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
 
-    # assume EOF: C5 = 1
+    # Assume EOF: C5 = 1
     right(5); clear(); inc(); left(5)
 
-    # if C1 != 0 then clear C5
+    # If C1 != 0, clear C5 (so it's not EOF)
     right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
 
-    # if C5==1 break main loop C2
+    # If C5 == 1 then break main loop (dec C2)
     right(5)
     loop_start()
-    clear()           # clear flag to avoid loop forever
+    clear()            # clear the flag to avoid infinite re-break
     left(3); dec(); right(3)
     loop_end()
     left(5)
 
-    # [STEP3] check '+'
+    # STEP 3: check '+'
     right(2); loop_start(); left(2)
 
     right(); clear(); left()
@@ -127,14 +133,14 @@ def main():
     loop_start(); dec(); right(); inc(); right(2); inc(); left(3); loop_end()
     right(3); loop_start(); dec(); left(3); inc(); right(3); loop_end(); left(3)
 
-    # subtract 43 from preserved C1
+    # Subtract 43 from preserved C1
     right(1); dec(43); left(1)
 
-    # check C1 == 0 -> set C5 = 1 if match
+    # If C1 == 0 set match flag C5=1
     right(5); clear(); inc(); left(5)
     right(1); loop_start(); clear(); right(4); clear(); left(4); loop_end(); left(1)
 
-    # if match emit inc rbx machine code
+    # If match emit inc rbx
     right(5); loop_start()
     clear()
     left(5)
@@ -144,7 +150,7 @@ def main():
 
     right(2); loop_end(); left(2)
 
-    # [STEP4] check '-'
+    # STEP 4: check '-'
     right(2); loop_start(); left(2)
 
     right(); clear(); left()
@@ -169,29 +175,26 @@ def main():
 
     right(2); loop_end(); left(2)
 
-    # 4. exit sequence
+    # 4) exit sequence (mov edi, ebx; mov eax,60; syscall)
     emit_machine_code_tracked([0x89, 0xdf, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
 
-    # 5. pad to 200 bytes
+    # 5) pad to total size (emit zeros)
     right(7); dec(200); loop_start(); inc(200); left(7); emit_byte_tracked(0); right(7); dec(200); loop_end(); inc(200); left(7)
 
-    # --- Post-process: append missing loop_end tokens exactly as counted ---
-    out_str = "".join(CMDS)
-    # Python-side counters ls_count / le_count were updated by loop_start()/loop_end() calls
-    global ls_count, le_count
-    # Note: variables are defined at module top; ensure we reference them.
-    try:
-        ls = ls_count
-        le = le_count
-    except NameError:
-        # fallback when executed in different context
-        ls = out_str.count(F+F+S + '\n')
-        le = out_str.count(F+F+F + '\n')
+    # --- Post-process: balance loop tokens if necessary ---
+    out_str = "".join(CHUNKS)
+
+    # Count plain patterns (without assuming newlines)
+    loop_start_pat = F + F + S
+    loop_end_pat = F + F + F
+
+    ls = out_str.count(loop_start_pat)
+    le = out_str.count(loop_end_pat)
 
     if ls > le:
         missing = ls - le
-        # append exactly `missing` loop_end tokens (without newline merging risk)
-        out_str += (F + F + F + '\n') * missing
+        # Append missing loop_end tokens exactly to the string (no newline needed)
+        out_str += (loop_end_pat) * missing
 
     # Final write
     sys.stdout.buffer.write(out_str.encode('utf-8'))
