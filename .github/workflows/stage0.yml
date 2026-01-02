@@ -26,13 +26,6 @@ jobs:
         run: |
           # ++[-] : 2 increment, then loop dec until 0.
           # If loop works, it finishes instantly.
-          # If loop is broken (skipped), it finishes instantly (but calc is wrong).
-          # If loop is broken (jump wrong), it segfaults or infinite loops.
-          # Let's try a logic that REQUIRES loop to work.
-          # +[>+<-]>. : Move 1 to next cell, print 1 (SOH, invisible but non-zero check?).
-          # Better: +++++ +++++ [->+>+<<] >> .
-          # 10 to (10, 10). Print 10 (\n).
-          # Let's just do `++[-]` for stability check first.
           echo -n "++[-]" > test.bf
 
       - name: Compile test.bf
