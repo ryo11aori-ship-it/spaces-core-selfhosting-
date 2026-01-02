@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_v1.py
 # Spaces Compiler Generator (Level 0.8: Lightweight BF to ELF Compiler)
-# Fix: Fixed Python IndentationError.
-#      Removed erroneous 'break' (dec C2) inside match handlers so it reads all input.
+# Fix: Removed extra 'left()' in emit_byte_tracked causing underflow.
+#      Ensures cursor position remains stable after emission.
 
 import sys
 
@@ -34,8 +34,8 @@ def emit_byte_tracked(val):
     right(9); clear(); inc(val); out(); clear(); left(9)
     # Increment Counter (C7)
     right(7); inc(); left(7)
-    # Return to C0
-    left() # Back to C0
+    # Return to C0 (Do NOT move left here!)
+    # Previous bug was here: left() -> Removed.
 
 def emit_machine_code_tracked(bytes_list):
     for b in bytes_list: emit_byte_tracked(b)
@@ -95,13 +95,11 @@ def main():
     right(); dec(43); right(2); clear(); inc(); left(2); loop_start(); right(2); clear(); left(2); clear(); loop_end()
     
     # If Match (+), Emit "inc rbx" (48 ff c3)
-    # We are at C3 (Match Flag).
     right(2); loop_start()
     clear() # Clear Flag
-    left(3) # Go to C0 (Cursor)
+    left(3) # Go to C0
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
     right(3) # Back to C3
-    # [FIXED] Removed 'dec C2' (break) here.
     loop_end(); left(3)
     
     right(2); loop_end(); left(2)
@@ -124,7 +122,6 @@ def main():
     left(3)
     emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
     right(3)
-    # [FIXED] Removed 'dec C2' (break) here.
     loop_end(); left(3)
     
     right(2); loop_end(); left(2)
