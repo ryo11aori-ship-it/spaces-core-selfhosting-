@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler with Long Jumps
-# Fix: Moved TOKEN_BASE to 15000 to avoid collision with growing Code Buffer.
-#      Prevents 'Tape pointer overflow' during self-hosting of large files.
+# Level 1.9: Full BF Compiler with Long Jumps (Optimized Code Size)
+# Fix: Optimized 'append_safe' to write batches in a single trip, drastically reducing .spaces file size.
+#      Replaced explicit padding list with a runtime loop to prevent source bloat.
 
 import sys
 
@@ -20,15 +20,12 @@ def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
-# Memory Layout
 WALL_POS = 98
 BUFFER_BASE = 100
-
-# Move Token Track far away to prevent collision with Buffer (which grows to ~7000+)
 TOKEN_WALL_POS = 14998
 TOKEN_BASE = 15000
-TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS # 2
-CROSS_TRACK_DIST = TOKEN_BASE - BUFFER_BASE - 1 # Distance from Token(N) to BufferData(N)
+TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS
+CROSS_TRACK_DIST = TOKEN_BASE - BUFFER_BASE - 1
 
 def emit_byte_tracked(val):
     right(8); clear()
@@ -44,16 +41,30 @@ def copy_c0_to_c1():
     loop_open(); dec(); right(1); inc(); right(2); inc(); left(3); loop_close()
     right(3); loop_open(); dec(); left(3); inc(); right(3); loop_close(); left(3)
 
+# Optimized Append: Moves once, writes all values, returns once.
 def append_safe(vals):
+    # 1. Go to Buffer Base
+    right(BUFFER_BASE)
+    # 2. Scan to End (Skip Flag=1)
+    loop_open(); right(2); loop_close()
+    
+    # 3. Write all values
     for v in vals:
-        right(BUFFER_BASE)
-        loop_open(); right(2); loop_close()
-        inc()
-        right(1); clear()
-        if v > 0: inc(v)
-        right(1); clear()
-        left(2); loop_open(); left(2); loop_close()
-        left(WALL_POS); right(8); inc(); left(8)
+        inc()        # Set Flag=1
+        right(1); clear() # Move to Data, Clear
+        if v > 0: inc(v)  # Write Data
+        right(1); clear() # Move to Next Flag, Clear
+        
+    # 4. Return Home
+    # We are at Next Flag (0). Move back to Last Flag (1).
+    left(2)
+    # Loop back while Flag is 1
+    loop_open(); left(2); loop_close()
+    # Back to C0 (from Wall)
+    left(WALL_POS)
+    
+    # 5. Update Counter C8
+    right(8); inc(len(vals)); left(8)
 
 def append_from_c5():
     right(BUFFER_BASE)
@@ -162,9 +173,18 @@ def check_char(char_code, logic_func):
     loop_open(); right(2); clear(); left(2); clear(); loop_close()
     right(2); loop_open(); left(3); logic_func(); right(3); clear(); loop_close(); left(3)
 
+def pad_zeros(count):
+    right(1); clear(); inc(count)
+    loop_open()
+    dec(); left(1)
+    right(8); clear(); out(); clear(); left(8)
+    right(7); inc(); left(7)
+    right(1)
+    loop_close()
+    left(1)
+
 def main():
     target_file_size = 500
-    total_size = 2000
     load_addr = 0x400000
     header_len = 120
     def p64(v): return list(v.to_bytes(8, "little"))
@@ -206,7 +226,7 @@ def main():
     loop_open(); right(1); out(); right(1); loop_close()
     left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
     emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
-    emit_bytes([0] * 1000)
+    pad_zeros(250); pad_zeros(250); pad_zeros(250); pad_zeros(250)
 
 if __name__ == "__main__":
     main()
