@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
 # Level 1.9: Full BF Compiler with Long Jumps
-# Fix: FLATTENED ALL CODE. NO INDENTATION ALLOWED.
+# Fix: Moved TOKEN_BASE to 15000 to avoid collision with growing Code Buffer.
+#      Prevents 'Tape pointer overflow' during self-hosting of large files.
 
 import sys
 
@@ -19,11 +20,15 @@ def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
 
+# Memory Layout
 WALL_POS = 98
 BUFFER_BASE = 100
-TOKEN_WALL_POS = 298
-TOKEN_BASE = 300
-TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS
+
+# Move Token Track far away to prevent collision with Buffer (which grows to ~7000+)
+TOKEN_WALL_POS = 14998
+TOKEN_BASE = 15000
+TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS # 2
+CROSS_TRACK_DIST = TOKEN_BASE - BUFFER_BASE - 1 # Distance from Token(N) to BufferData(N)
 
 def emit_byte_tracked(val):
     right(8); clear()
@@ -137,15 +142,15 @@ def patch_at_c6_with_c5():
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
     right(6); loop_close(); left(6)
     right(TOKEN_BASE); loop_open(); right(2); loop_close()
-    left(199); clear()
-    right(199); left(TOKEN_DELTA)
+    left(CROSS_TRACK_DIST); clear()
+    right(CROSS_TRACK_DIST); left(TOKEN_DELTA)
     right(5); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(5)
-    right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
-    right(199); left(TOKEN_DELTA); right(4)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(CROSS_TRACK_DIST)
+    right(CROSS_TRACK_DIST); left(TOKEN_DELTA); right(4)
     loop_open()
-    dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
+    dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(CROSS_TRACK_DIST)
     inc()
-    right(199); left(TOKEN_DELTA); right(4)
+    right(CROSS_TRACK_DIST); left(TOKEN_DELTA); right(4)
     loop_close()
     left(4)
     right(TOKEN_BASE); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
