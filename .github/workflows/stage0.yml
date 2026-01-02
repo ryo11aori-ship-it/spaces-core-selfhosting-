@@ -17,14 +17,13 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler
+      # --- Level 0: Static Compiler Check (Previous) ---
+      - name: Generate Static Compiler
         run: |
           mkdir -p spaces/self
-          # 失敗してもログを出すために || で繋ぐ
           python3 tools/gen_spaces_direct.py > spaces/self/spaces_compiler.spaces
-
           echo "=== BF debug head ==="
-          head -n 5 bf_debug.log
+          head -n 5 bf_debug.log || true
 
       - name: Prepare Spaces Source
         run: |
@@ -40,41 +39,31 @@ jobs:
           od -t x1 hello.spaces | head -n 4
           echo "================================================"
 
-      - name: Compile (Spaces -> ELF)
+      - name: Compile (Static)
         run: |
           echo "Compiling hello.spaces..."
           ./bin/ref_vm spaces/self/spaces_compiler.spaces < hello.spaces > hello_spaces.elf
           chmod +x hello_spaces.elf
           
-          # 【診断2】出力ファイルの中身を確認（コードが生成されているか？）
+          # 【診断2】出力ファイルの中身を確認
           echo "=== DIAGNOSIS: hello_spaces.elf (First 256 bytes) ==="
           ls -l hello_spaces.elf
           od -t x1 hello_spaces.elf | head -n 16
           echo "====================================================="
 
-      - name: Run Generated Binary
+      - name: Run Static Binary
         run: |
           echo "Running..."
           ./hello_spaces.elf > output.txt
           cat output.txt
-          
           if grep -q "Hello, world!" output.txt; then
-            echo "🎉 SUCCESS: Spaces Compiler compiled Spaces Code!"
+            echo "🎉 SUCCESS: Static Compiler works!"
           else
             echo "❌ Failed."
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: stage12-files
-          path: |
-            hello.spaces
-            hello_spaces.elf
-            output.txt
-      # ... (前のステップ：ディレクトリ作成やビルドなど) ...
-
+      # --- Level 0.5: Smart Compiler Check (New) ---
       - name: Generate Smart Compiler
         run: |
           # 1. コンパイラ（Spacesコード）を生成
@@ -82,12 +71,7 @@ jobs:
 
       - name: Compile hello.spaces using Smart Compiler
         run: |
-          # 事前確認: 入力ファイル hello.spaces があるか確認（なければ前の手順で作る必要がありますが、今回はある前提）
-          ls -l hello.spaces
-          
           # 2. Spacesコンパイラを実行（入力として hello.spaces を与える）
-          # VMが spaces/self/smart_compiler.spaces を実行し、
-          # そのプログラムが hello.spaces を読み込んで、hello_smart.elf を吐き出します
           ./bin/ref_vm spaces/self/smart_compiler.spaces < hello.spaces > hello_smart.elf
 
       - name: Verify Smart Compiler Output
@@ -96,12 +80,10 @@ jobs:
           chmod +x hello_smart.elf
 
           # 期待値の取得: hello.spaces の先頭1バイトを数値(0-255)として取得
-          # (odコマンドを使っています)
           EXPECTED_CODE=$(od -An -t u1 -N 1 hello.spaces | tr -d ' \n')
           echo "Expected Exit Code (First byte of input): $EXPECTED_CODE"
 
           # 4. 実行して終了コードを確認
-          # set +e: 終了コードが0以外でもActionを即停止させないためのおまじない
           set +e
           ./hello_smart.elf
           ACTUAL_CODE=$?
@@ -119,3 +101,14 @@ jobs:
             exit 1
           fi
 
+      # 最後にまとめてアーティファクトを保存
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compiler-outputs
+          path: |
+            hello.spaces
+            hello_spaces.elf
+            output.txt
+            spaces/self/smart_compiler.spaces
+            hello_smart.elf
