@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_loop.py
-# Level 1.0: The Real Loop Compiler
+# Level 1.0: The Real Loop Compiler (Fixed Indentation)
 #
 # Generates a Spaces program that:
 # 1. Emits ELF Header.
@@ -79,15 +79,7 @@ def main():
     clear(); inp()
     
     # 2. Check EOF (Is C0 == 0?)
-    # Copy C0 -> C1
-    right(1); clear(); left(1)
-    loop_open(); dec(); right(); inc(); left(); loop_close()
-    right(); loop_open(); left(); inc(); right(); dec(); loop_close(); left() # Restore C0 from C1 (if needed for checks) and keep C1 as copy?
-    # Actually, simpler: Move C0->C1. If C1 is 0, then EOF.
-    # Restore: C1->C0 copy.
-    # Let's do: C0 -> C1. Check C1. If C1==0 -> Clear C2 (Flag).
-    # Then Restore C0 from C1 is impossible if C0 consumed.
-    # Pattern: Copy C0 to C1 and C3.
+    # Copy C0 to C1 and C3.
     right(1); clear(); right(2); clear(); left(3) # Clear C1, C3
     loop_open(); dec(); right(); inc(); right(2); inc(); left(3); loop_close() # C0 -> C1, C3
     right(3); loop_open(); left(3); inc(); right(3); dec(); loop_close(); left(3) # Restore C0 from C3
@@ -97,25 +89,21 @@ def main():
     right(3); clear(); inc(); left(3) # C3=1
     right(1) # At C1
     loop_open() 
-       # If C1 is not zero, enter here.
-       right(2); clear(); left(2) # Set C3=0
-       clear() # Clear C1
+    # If C1 is not zero, enter here.
+    right(2); clear(); left(2) # Set C3=0
+    clear() # Clear C1
     loop_close()
     left(1) # Back to C0
     
     # If C3 == 1 (EOF), Clear C2 (Main Loop Flag)
     right(3)
     loop_open()
-       left(); clear(); right() # Clear C2
-       clear() # Clear C3
+    left(); clear(); right() # Clear C2
+    clear() # Clear C3
     loop_close()
     left(3) # Back to C0
     
-    # 3. Check '+' (43) - Only if C2 is still 1?
-    # Actually, if C2 is 0, we can still run checks, they just won't match 0.
-    # But strictly, we should probably guard.
-    # Let's just check normally. C0 has char.
-    
+    # 3. Check '+' (43)
     # Copy C0 -> C1
     right(1); clear(); left(1)
     loop_open(); dec(); right(); inc(); right(); inc(); left(2); loop_close()
@@ -129,10 +117,10 @@ def main():
     # If Match (C3==1), Emit
     right(2)
     loop_open()
-       left(3) # Go to C0
-       emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
-       right(3)
-       clear()
+    left(3) # Go to C0
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xc3)
+    right(3)
+    clear()
     loop_close()
     left(2); left() # Back to C0
 
@@ -147,10 +135,10 @@ def main():
     
     right(2)
     loop_open()
-       left(3)
-       emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
-       right(3)
-       clear()
+    left(3)
+    emit_byte_tracked(0x48); emit_byte_tracked(0xff); emit_byte_tracked(0xcb)
+    right(3)
+    clear()
     loop_close()
     left(2); left() # Back to C0
     
@@ -163,10 +151,10 @@ def main():
     # 4. Padding (C7 -> 300)
     right(7); dec(300)
     loop_open()
-       inc(300); left(7)
-       # Emit 0 manually
-       right(8); clear(); out(); left(8); right(7); inc()
-       left(7); right(7); dec(300)
+    inc(300); left(7)
+    # Emit 0 manually
+    right(8); clear(); out(); left(8); right(7); inc()
+    left(7); right(7); dec(300)
     loop_close()
 
 if __name__ == "__main__":
