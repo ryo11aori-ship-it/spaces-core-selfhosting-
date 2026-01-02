@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_basic.py
 # Level 1.5: Brainfuck Compiler (Basic 6 Commands)
-# Fixed: Removed all visual indentation that caused Syntax Errors.
+# Fixed: Increased p_memsz in ELF header to avoid Segmentation Fault.
+#        Now allocates 64KB memory so data pointer (0x402000) is valid.
 
 import sys
 
@@ -83,7 +84,9 @@ def main():
     prog_header = [
         0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00,
         *p64(0), *p64(load_addr), *p64(load_addr),
-        *p64(total_size), *p64(total_size), *p64(0x1000)
+        *p64(total_size),       # File Size (500 bytes)
+        *p64(0x10000),          # Memory Size (64KB) <-- FIXED: Allocates plenty of RAM
+        *p64(0x1000)
     ]
     
     # 1. ELF Header
