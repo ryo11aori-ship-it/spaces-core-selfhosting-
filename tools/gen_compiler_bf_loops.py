@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler (Self-Hosting Linear)
-# Fix: Increased target_file_size to 10000 to prevent segfaults due to ELF truncation.
-#      Standard Indentation. Robust Logic.
+# Level 1.9: Full BF Compiler (Optimization: Source Code Size Reduction)
+# Fix: Replaced unrolled padding with runtime BF loops.
+#      Optimized byte streaming to minimize tape movement.
 
 import sys
 
@@ -44,16 +44,66 @@ def clear():
 DATA_CELL = 100
 OUTPUT_CELL = 200
 
-def emit_byte_literal(val):
+# Optimized Emitter: Moves to Output, writes ALL bytes, then returns.
+# Drastically reduces source code size compared to per-byte movement.
+def emit_bytes_literal(vals):
+    if not vals: return
+    
+    # Move to OUTPUT_CELL
     right(OUTPUT_CELL - DATA_CELL)
-    clear()
-    inc(val)
-    out()
+    
+    for v in vals:
+        clear()
+        if v > 0: inc(v)
+        out()
+    
+    # Return to DATA_CELL
     left(OUTPUT_CELL - DATA_CELL)
 
-def emit_bytes_literal(vals):
-    for v in vals:
-        emit_byte_literal(v)
+# Runtime Padding: Generates a BF loop to output zeros.
+# Prevents "File too large" errors by not unrolling loops in source code.
+def emit_padding_loop(count):
+    # We need to output 'count' zeros.
+    # We use OUTPUT_CELL+1 as the counter.
+    # 1. Move to Counter (OUTPUT_CELL+1)
+    right(OUTPUT_CELL - DATA_CELL + 1)
+    clear()
+    
+    # We can't set huge numbers easily with simple inc.
+    # We use nested loops for large counts.
+    # count = outer * inner + remainder
+    outer = count // 100
+    remainder = count % 100
+    
+    if outer > 0:
+        inc(outer)
+        loop_open() # Outer Loop
+        # Set Inner Counter (OUTPUT_CELL+2) to 100
+        right(1); clear(); inc(100)
+        loop_open() # Inner Loop
+        # Output 0 at OUTPUT_CELL
+        left(2) # Go to OUTPUT_CELL
+        clear(); out()
+        right(2) # Back to Inner Counter
+        dec()
+        loop_close() # End Inner
+        
+        left(1) # Back to Outer Counter
+        dec()
+        loop_close() # End Outer
+        
+    if remainder > 0:
+        # Simple remaining loop
+        inc(remainder)
+        loop_open()
+        left(1) # Go to OUTPUT_CELL
+        clear(); out()
+        right(1) # Back to Counter
+        dec()
+        loop_close()
+
+    # Return to DATA_CELL
+    left(OUTPUT_CELL - DATA_CELL + 1)
 
 def check_and_emit(delta, code_bytes):
     dec(delta)
@@ -64,7 +114,6 @@ def check_and_emit(delta, code_bytes):
     inc() # Temp1 = 1
     left(1)
     
-    # If DATA_CELL != 0, Set Temp1 = 0
     # Non-destructive check using Temp 2 (102)
     loop_open()
     right(1)
@@ -91,8 +140,8 @@ def check_and_emit(delta, code_bytes):
     left(1)
 
 def main():
-    # INCREASED SIZE to accommodate larger output binaries
-    target_file_size = 10000 
+    # Target large enough for self-hosted compiler
+    target_file_size = 12000
     load_addr = 0x400000
     
     def p64(v): return list(v.to_bytes(8, "little"))
@@ -113,9 +162,14 @@ def main():
     # Init
     right(DATA_CELL)
     
-    # Emit Header
+    # Emit Header (Batch optimized)
     emit_bytes_literal(header + prog_header)
     emit_bytes_literal([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
+    
+    # Keep track of emitted size to calculate padding
+    emitted_size = len(header) + len(prog_header) + 7
+    # + EOF Exit Code size (10 bytes)
+    padding_size = target_file_size - emitted_size - 10
     
     # Loop Setup (Flag at 105)
     right(5)
@@ -126,36 +180,30 @@ def main():
     # Read
     inp()
     
-    # EOF Check (Temp 101)
-    loop_open(); right(1); inc(); left(1); dec(); loop_close() # Move to Temp
-    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1) # Restore
+    # EOF Check logic (same as before)
+    loop_open(); right(1); inc(); left(1); dec(); loop_close()
+    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1)
     
-    # Check Temp. If 0 (EOF), Clear Flag (105).
-    # Logic: Set IsEOF(102)=1. If Temp!=0, IsEOF=0.
-    right(2); inc(); left(1) # IsEOF=1
+    right(2); inc(); left(1)
     loop_open()
-    right(1); dec(); left(1) # IsEOF=0
-    clear() # Clear Temp
+    right(1); dec(); left(1)
+    clear()
     loop_close()
     
-    # Check IsEOF
+    # Check IsEOF (102)
     right(2)
     loop_open()
     # EOF Action
     left(2)
-    # Emit Exit & Pad
     emit_bytes_literal([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
-    # Massive Padding to ensure size matches header
-    # We output ~2500 bytes so far? 
-    # Just emit 7000 zeros to be safe.
-    for _ in range(7000):
-        emit_byte_literal(0)
+    
+    # Efficient Runtime Padding
+    emit_padding_loop(padding_size)
     
     right(2) # Back to IsEOF
     
-    # Kill Flag
+    # Kill Flags
     right(3); dec(); left(3)
-    # Kill IsEOF
     dec()
     loop_close()
     left(2)
@@ -168,8 +216,8 @@ def main():
     check_and_emit(14, [0x48, 0xff, 0xcb])
     check_and_emit(2, [0x48, 0xff, 0xc3])
     
-    dec(29) # Skip [
-    dec(2) # Skip ]
+    dec(29)
+    dec(2)
     
     clear()
     right(5)
