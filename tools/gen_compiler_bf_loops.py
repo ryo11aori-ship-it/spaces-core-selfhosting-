@@ -1,356 +1,185 @@
 #!/usr/bin/env python3
+# tools/gen_compiler_bf_loops.py
+# Level 1.8: Full Brainfuck Compiler with Loops
+# Fix: Add initial pointer headroom to avoid tape-pointer underflow.
+#       Keep previously applied relative-move fixes.
+
 import sys
 
-# --- Spaces Dialect (No visual indent needed) ---
-S=" "; F="\u3000"
-def e(s): sys.stdout.write(s+"\n")
-def R(n=1): 
-    if n>0: e((S+S+S)*n)
-def L(n=1): 
-    if n>0: e((S+S+F)*n)
-def I(n=1): 
-    if n>0: e((S+F+S)*n)
-def D(n=1): 
-    if n>0: e((S+F+F)*n)
-def O(): e(F+S+S)
-def N(): e(F+S+F)
-def B(): e(F+F+S)
-def C(): e(F+F+F)
-def Z(): B(); D(); C()
+S = " "
+F = "\u3000"
 
-# --- Memory Layout ---
-# 10: Input Char
-# 20: Output Size Counter (Low)
-# 21: Output Size Counter (High) - for 16bit addressing
-# 30: Stack Pointer (Offset from Stack Base)
-# 500: Stack Base
-# 1000: Output Buffer Base
+def emit(s): sys.stdout.write(s + "\n")
+def right(n=1): emit((S+S+S)*n)
+def left(n=1): emit((S+S+F)*n)
+def inc(n=1): emit((S+F+S)*n)
+def dec(n=1): emit((S+F+F)*n)
+def out(): emit(F+S+S)
+def inp(): emit(F+S+F)
+def loop_open(): emit(F+F+S)
+def loop_close(): emit(F+F+F)
+def clear(): loop_open(); dec(); loop_close()
 
-IN=10
-SZ_L=20
-SZ_H=21
-SP=30
-STK=500
-BUF=1000
+# Memory Layout
+WALL_POS = 98
+BUFFER_BASE = 100
+TOKEN_WALL_POS = 298
+TOKEN_BASE = 300
 
-# Helper: Move from A to B
-def mv(a,b):
-    d=b-a
-    if d>0: R(d)
-    else: L(-d)
+# small helper: number of cells between token base and token wall
+TOKEN_DELTA = TOKEN_BASE - TOKEN_WALL_POS  # expected 2
 
-# Helper: Write Byte to Buffer at [BUF + Size]
-def write_buf(val):
-    # 1. Calculate Target Address: BUF + (SZ_H*256 + SZ_L)
-    # Since we can't random access easily, we use a "Traveler".
-    # But wait, we are just appending!
-    # We can keep a "Head Pointer" at the end of buffer.
-    # But we need Random Access for Backpatching `]`.
-    # So we MUST implement "Go to Index".
+def emit_byte_tracked(val):
+    right(8); clear()
+    if val > 0: inc(val)
+    out(); clear(); left(8)
+    right(7); inc(); left(7)
+
+def emit_bytes(vals):
+    for v in vals: emit_byte_tracked(v)
+
+def copy_c0_to_c1():
+    right(1); clear(); right(2); clear(); left(3)
+    loop_open(); dec(); right(1); inc(); right(2); inc(); left(3); loop_close()
+    right(3); loop_open(); dec(); left(3); inc(); right(3); loop_close(); left(3)
+
+def append_safe(vals):
+    for v in vals:
+        right(BUFFER_BASE)
+        loop_open(); right(2); loop_close()
+        inc()
+        right(1); clear()
+        if v > 0: inc(v)
+        right(1); clear()
+        left(2); loop_open(); left(2); loop_close()
+        left(WALL_POS); right(8); inc(); left(8)
+
+def compile_bracket_open():
+    append_safe([0x80, 0x3b, 0x00])
+    append_safe([0x74, 0x00])
+    right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
+    right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
+    right(40); dec(); left(40)
+
+def compile_bracket_close():
+    right(8); loop_open(); dec(); left(7); inc(); right(1); inc(); left(2); loop_close()
+    right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
+    right(40); loop_open(); dec(); left(39); dec(); right(39); loop_close(); left(40)
+    right(1); inc(2); left(1)
+    right(2); inc(256); left(2)
+    right(1); loop_open(); dec(); right(1); dec(); left(1); loop_close(); left(1)
+    append_safe([0xeb])
+    right(BUFFER_BASE); loop_open(); right(2); loop_close(); inc(); right(1); clear()
+    left(BUFFER_BASE + 2); right(2)
+    loop_open(); dec(); left(2); right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(); inc(); left(); loop_open(); left(2); loop_close(); left(BUFFER_BASE); right(2); loop_close()
+    left(2)
+    right(BUFFER_BASE); loop_open(); right(2); loop_close(); right(1); clear(); left(2); loop_open(); left(2); loop_close(); left(WALL_POS); right(8); inc(); left(8)
+    patch_c40_with_diff()
+
+def patch_c40_with_diff():
+    # 1. Calculate Diff (C3)
+    right(8); loop_open(); dec(); left(5); inc(); right(5); loop_close(); left(8)
+    right(1); loop_open(); dec(); left(1); inc(); right(8); inc(); left(8); loop_close(); left(1)
+    right(40); loop_open(); dec(); left(37); dec(); right(37); loop_close(); left(40)
+    right(3); dec(); left(3)
     
-    # Optimization: For appending, we just remember where we are?
-    # No, we need to support Backpatch.
-    # Let's implement a "Move to Buffer Index" routine.
-    # Current Pos is known (Base).
-    # Target Index is in SZ_L/SZ_H.
+    # 2. Place Token at token track
+    right(TOKEN_BASE); inc(); left(TOKEN_BASE)
     
-    # Simpler: We keep the Tape Head at the "End of Buffer" normally.
-    # And only move back for patching.
-    # NO. We need a robust state.
-    # Let's assume we are at BUF_HEAD (variable).
-    # We write, then inc BUF_HEAD.
-    pass
+    # 3. Move Token Right C40 times (marker movement)
+    right(40); loop_open(); dec(); left(40)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); dec(); right(2); inc(); left(2); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
+    right(40); loop_close(); left(40)
+    
+    # 4. Find Token and clear target
+    right(TOKEN_BASE); loop_open(); right(2); loop_close()
+    left(199)
+    clear() # Clear Target
+    
+    # 5. Return to Token before going Home
+    right(199)
+    # SAFETY: instead of large absolute left to token wall, move only TOKEN_DELTA (small, safe)
+    left(TOKEN_DELTA)
+    
+    # 6. Move C3 (Diff) to C4
+    right(3); loop_open(); dec(); right(1); inc(); left(1); loop_close(); left(3)
+    
+    # 7. Add C4 to Target (safe relative moves)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close()
+    left(199) # go to target
+    # go back to C4 via safe relative path
+    right(199)
+    left(TOKEN_DELTA)
+    right(4)
+    loop_open()
+    dec(); left(4); right(TOKEN_BASE); loop_open(); right(2); loop_close(); left(199)
+    inc()
+    right(199); loop_open(); left(2); loop_close(); left(TOKEN_DELTA); right(4)
+    loop_close()
+    left(4)
+    
+    # 8. Clear Token (safe)
+    right(TOKEN_BASE); loop_open(); right(2); loop_close(); clear(); loop_open(); left(2); loop_close(); left(TOKEN_BASE)
 
-# Since implementing full random access in this flat script is complex,
-# I will use a simplified "Linear Write with Stack" approach.
-# We hold the Stack in 500.
-# We hold the Binary in 1000+.
-# When `[` comes, we write placeholder, push current index to stack.
-# When `]` comes, we pop index, calculate diff, go back and patch.
+def check_char(char_code, logic_func):
+    copy_c0_to_c1()
+    right(1); dec(char_code)
+    right(2); clear(); inc(); left(2)
+    loop_open(); right(2); clear(); left(2); clear(); loop_close()
+    right(2); loop_open(); left(3); logic_func(); right(3); clear(); loop_close(); left(3)
 
 def main():
-    target_size = 100000
+    target_file_size = 500
+    total_size = 1000
     load_addr = 0x400000
-    
+    header_len = 120
     def p64(v): return list(v.to_bytes(8, "little"))
     def p32(v): return list(v.to_bytes(4, "little"))
-    
-    # 1. Emit Header immediately to Buffer
-    header = [0x7f,0x45,0x4c,0x46,0x02,0x01,0x01,0x00,0,0,0,0,0,0,0,0,0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00]
-    header += p64(load_addr + 120) + p64(64) + p64(0) + p32(0)
-    header += [0x40,0x00,0x38,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00]
-    ph = [0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00] + p64(0) + p64(load_addr) + p64(load_addr) + p64(target_size) + p64(0x10000) + p64(0x1000)
-    
-    # --- GENERATE SPACES CODE ---
-    
-    # Init Pointers
-    R(SZ_L) # At Size Low
-    
-    # Helper to append bytes to buffer
-    # Updates SZ_L/SZ_H and writes to tape.
-    def append(vals):
-        for v in vals:
-            # 1. Move to Buffer End (BUF + Size)
-            # This is slow O(N). But necessary for robustness without complex logic.
-            # We track "Distance from SZ_L to Buffer End" in a cell?
-            # No. We just move right by (BUF - SZ_L) + Size.
-            # Size is stored in SZ_L/SZ_H.
-            # Copy Size to Temp. Move Temp times.
-            
-            # Simplified: Use a "Traveler" marker.
-            # We mark the End of Buffer with a Flag?
-            # Buffer is 1000+.
-            # We assume Buffer cells are non-zero? No.
-            # We maintain a "Head Pointer" at Cell 40 (HD).
-            # HD stores the current offset from BUF.
-            
-            # Setup:
-            # We are at SZ_L.
-            # Move to BUF + HD.
-            # To do this, we need "Move Right by X".
-            # [-> R(1) <] logic.
-            
-            # Since I can't write complex loops easily here...
-            # I will use the "Head-at-End" optimization again but with a twist.
-            # We keep the logical head at the End of Buffer.
-            # Stack is at the Left (500).
-            # When we need Stack, we go Left 500+Size.
-            # When we need Write, we are already there.
-            pass
-            
-            # For this script, let's just emit literal moves.
-            # It makes the source huge, but logic simple.
-            # BUT "File too large" error.
-            # So we MUST use loops for movement.
-            
-            # "Move Right by HD":
-            # Go to HD(40). Copy to Temp(41).
-            # Loop Temp: R(1), Dec Temp.
-            pass
-    
-    # Since writing a full random-access Turing Machine in this flat script is error-prone,
-    # and we need `compiler_linear.elf` to just "work" once...
-    
-    # EMERGENCY STRATEGY:
-    # `compiler_linear.bf` uses loops.
-    # But does it use *nested* loops? Yes.
-    # Does it use *backward* jumps? Yes.
-    
-    # I will output the Spaces code for a "Simple One-Pass Compiler" 
-    # that supports `[` and `]` using a 16-bit Stack.
-    
-    # Init
-    R(BUF); I(1); L(BUF) # Mark Buffer Start
-    
-    # Setup Header in Buffer
-    R(BUF)
-    for b in header + ph + [0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00]:
-        Z(); I(b); R(1)
-    # Current Head is at End of Header.
-    
-    # Main Loop
-    # We need to toggle between Input(10) and Buffer Head.
-    # We keep Input at 10.
-    # We keep Buffer Head at ... wherever it is.
-    # We store "Distance from 10 to Head" in Cell 12.
-    # Init Distance = BUF - 10 + len(header)
-    L(BUF); R(12); I(BUF - 10 + len(header + ph) + 7); L(12)
-    
-    # Read Loop
-    R(10); N(); # Read to 10
-    
-    # EOF Check
-    B() # While Input!=0
-        # Check Char
-        # + (43)
-        Z(); I(1); R(1); Z(); L(1) # Flag=1 at 11
-        # Copy 10 -> 12.
-        B(); R(2); I(1); L(2); D(); C()
-        R(2); B(); L(2); I(1); R(2); D(); C(); L(2)
-        # Check 12 == 43
-        R(2); D(43); 
-        # If 0, Match.
-        B(); L(1); Z(); R(1); Z(); C() # If 12!=0, Flag=0
-        L(1)
-        B() # If Flag=1
-           # Append code for +
-           # Move to Head
-           R(1); B(); R(1); L(1); D(); C(); R(1) # Move right by Dist(12)
-           # Write [0xfe, 0x03]
-           Z(); I(0xfe); R(1); I(1) # Dist++
-           Z(); I(0x03); R(1); I(1) # Dist++
-           # Return to 10
-           L(1); B(); L(1); R(1); D(); C(); L(1) # Move left by Dist
-           Z() # Clear Flag
-        C()
-        
-        # This "Move by N" logic is slow but works.
-        # But we need to update Dist(12) correctly.
-        # In the loop above: `R(1); I(1)` updates Dist copy at head? No.
-        # We need to update Cell 12 itself.
-        # This requires traversing back.
-        
-        # ABORT: The complexity of "Move by N" in BF is high.
-        # Let's use the "Tethered" approach.
-        # We hold the Head.
-        # We go back to 10 to read.
-        # We go forward to Head to write.
-        # How do we know how far?
-        # We mark 10 with a Sentinel?
-        # No, 10 is data.
-        # We mark 0 with Sentinel.
-        
-        # TETHERED LOGIC:
-        # Cell 0 = Sentinel (0xFF).
-        # Cell 10 = Input.
-        # Cell 1000+ = Buffer.
-        # We are at Head.
-        # 1. Go Left until Sentinel.
-        # 2. Go Right to 10. Read.
-        # 3. Go Right until 0 (End of Buffer).
-        # 4. Write.
-        
-        # This works if Buffer has no 0s.
-        # ELF HAS ZEROS.
-        # So we cannot scan for 0.
-        # We must use a "Cursor" marker.
-        # Buffer: [Data, Marker(1), 0, ...]
-        # Write: Replace Marker with Data. Write new Marker at next.
-        
-        # CORRECT.
-        pass
-    
-    # FINAL TETHERED CODE
-    # 0: Sentinel
-    Z(); I(255)
-    
-    # Write Header with Marker
-    R(BUF)
-    for b in header + ph + [0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00]:
-        Z(); I(b); R(1)
-    Z(); I(1) # Marker
-    
-    # Read Loop
-    L(BUF); L(255) # Search 255 (Sentinel)
-    B(); R(1); L(1); D(); C() # Scan left until 255?
-    # Scan logic: [L(1)] until 255.
-    # But we need to check value.
-    # Copy to temp?
-    # Simple: All cells < 1000 are 0 (except 10).
-    # Just L(1) until we hit 0? No.
-    # We know we are at Head.
-    # Left until we hit 255 at 0.
-    
-    # IMPLEMENTATION OF LEFT SCAN
-    # Assumes path is clear (0).
-    # But Buffer has data.
-    # We are inside buffer.
-    # We can't distinguish Data from 0.
-    
-    # OK, we use "Frame"
-    # [Data, 1, 0]
-    # We are at 1.
-    # We want to go to 0.
-    
-    # Let's just hardcode the "Simple Linear Compiler" logic since loops are too hard for this snippet.
-    # The user's `compiler_linear.bf` is linear logic mostly.
-    # I will output the code that produces a VALID ELF.
-    pass
+    header = [
+        0x7f,0x45,0x4c,0x46,0x02,0x01,0x01,0x00,0,0,0,0,0,0,0,0,
+        0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00,
+        *p64(load_addr + header_len), *p64(64), *p64(0), *p32(0),
+        0x40,0x00,0x38,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    ]
+    prog_header = [
+        0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00,
+        *p64(0), *p64(load_addr), *p64(load_addr),
+        *p64(target_file_size), *p64(0x10000), *p64(0x1000)
+    ]
+    emit_bytes(header + prog_header)
 
-    # RESTART with clean logic
-    # We just need to output valid ELF bytes.
-    # We can read input. If input is `+`, output bytes.
-    # We ignore loops for now to prevent Segfault.
-    # Why did it segfault? Because code ran off end?
-    # If I just output `ret` (0xc3) at end?
-    
-    # I will produce a code that reads input, ignores loops, emits linear code, and exits.
-    # This should verify "Self Hosting" for linear part.
-    
-    R(100) # Input
-    N()
-    B()
-        # Check +
-        D(43); 
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C() # Check 0
-        R(1); B(); D(); L(1); 
-             # Emit +
-             R(100); Z(); I(0xfe); O(); Z(); I(0x03); O(); L(100)
-        C(); L(1)
-        
-        # Restore 43
-        I(43)
-        
-        # Check ,
-        D(44);
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-        R(1); B(); D(); L(1); 
-             # Emit ,
-             R(100)
-             Z(); I(0xb8); O(); Z(); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0xbf); O(); Z(); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0x48); O(); Z(); I(0x89); O(); Z(); I(0xde); O()
-             Z(); I(0xba); O(); Z(); I(0x01); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0x0f); O(); Z(); I(0x05); O()
-             L(100)
-        C(); L(1)
-        I(44)
-        
-        # Check -
-        D(45);
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-        R(1); B(); D(); L(1); 
-             R(100); Z(); I(0xfe); O(); Z(); I(0x0b); O(); L(100)
-        C(); L(1)
-        I(45)
+    # === SAFETY: allocate headroom so no left(...) will underflow ===
+    # Move the pointer well to the right at program start. All subsequent
+    # left(...) operations will then be offset from this safe baseline.
+    # 1000 is chosen conservatively; adjust if your VM tape is smaller.
+    right(1000)
 
-        # Check .
-        D(46);
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-        R(1); B(); D(); L(1); 
-             R(100)
-             Z(); I(0xb8); O(); Z(); I(1); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0xbf); O(); Z(); I(1); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0x48); O(); Z(); I(0x89); O(); Z(); I(0xde); O()
-             Z(); I(0xba); O(); Z(); I(0x01); O(); Z(); O(); Z(); O(); Z(); O()
-             Z(); I(0x0f); O(); Z(); I(0x05); O()
-             L(100)
-        C(); L(1)
-        I(46)
-
-        # Check <
-        D(60);
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-        R(1); B(); D(); L(1); 
-             R(100); Z(); I(0x48); O(); Z(); I(0xff); O(); Z(); I(0xcb); O(); L(100)
-        C(); L(1)
-        I(60)
-        
-        # Check >
-        D(62);
-        R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-        R(1); B(); D(); L(1); 
-             R(100); Z(); I(0x48); O(); Z(); I(0xff); O(); Z(); I(0xc3); O(); L(100)
-        C(); L(1)
-        I(62)
-        
-        # Ignore [ ]
-        
-        Z()
-        N()
-    C()
-    
-    # Exit
-    R(100)
-    Z(); I(0x48); O(); Z(); I(0x31); O(); Z(); I(0xff); O()
-    Z(); I(0xb8); O(); Z(); I(0x3c); O(); Z(); O(); Z(); O(); Z(); O()
-    Z(); I(0x0f); O(); Z(); I(0x05); O()
-    
-    # Padding
-    R(1); Z(); I(250); B()
-      L(1); Z(); O(); R(1)
-      D()
-    C()
+    # original setup (relative to the above pointer)
+    emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
+    right(WALL_POS); clear(); right(); inc(255); left(100)
+    right(TOKEN_WALL_POS); clear(); left(TOKEN_WALL_POS)
+    right(BUFFER_BASE); clear(); left(BUFFER_BASE)
+    right(2); clear(); inc(); left(2)
+    right(2); loop_open(); left(2)
+    clear(); inp()
+    copy_c0_to_c1()
+    right(3); clear(); inc(); left(2)
+    loop_open(); right(2); clear(); left(2); clear(); loop_close()
+    right(2); loop_open(); left(1); clear(); right(1); clear(); loop_close(); left(3)
+    check_char(62, lambda: append_safe([0x48, 0xff, 0xc3]))
+    check_char(60, lambda: append_safe([0x48, 0xff, 0xcb]))
+    check_char(43, lambda: append_safe([0xfe, 0x03]))
+    check_char(45, lambda: append_safe([0xfe, 0x0b]))
+    check_char(46, lambda: append_safe([0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
+    check_char(44, lambda: append_safe([0xb8, 0x00, 0x00, 0x00, 0x00, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
+    check_char(91, lambda: compile_bracket_open())
+    check_char(93, lambda: compile_bracket_close())
+    right(2); loop_close(); left(2)
+    right(BUFFER_BASE)
+    loop_open(); right(1); out(); right(1); loop_close()
+    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
+    emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
+    emit_bytes([0] * 1000)
 
 if __name__ == "__main__":
     main()
