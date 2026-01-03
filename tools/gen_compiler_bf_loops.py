@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler (Fix: FLATTENED CODE - NO INDENTATION ERRORS)
+# Level 1.9: Full BF Compiler (Fix: Flattened Logic & Safe Data Handling)
 
 import sys
 
@@ -17,6 +17,11 @@ def inp(): emit(F+S+F)
 def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
+
+# Memory Layout
+# C98: Wall (0)
+# C100+: Buffer [Flag, Data]
+# Flag: 1=Filled, 2=Cursor
 
 WALL_POS = 98
 BUFFER_BASE = 100
@@ -46,30 +51,22 @@ def go_home_from_cursor():
 def return_to_cursor_simple():
     right(WALL_POS); loop_open(); right(2); loop_close(); left(2)
 
-def compile_bracket_open():
-    go_home_from_cursor()
-    right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
-    right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
-    return_to_cursor_simple()
-    stream_bytes([0x80, 0x3b, 0x00])
-    stream_bytes([0x0f, 0x84, 0x00, 0x00, 0x00, 0x00])
-
-def compile_bracket_close():
-    stream_bytes([0xe9])
-    go_home_from_cursor()
-    return_to_cursor_simple()
-
 def sub_and_check(delta, action_func):
     right(1); dec(delta)
-    right(1); clear(); inc(); left(1)
-    loop_open(); right(1); dec(); left(1); loop_open(); left(1); loop_close(); loop_close()
+    # Copy Data(R1) to Temp(R2) non-destructively
+    loop_open(); left(1); inc(); right(2); inc(); left(1); dec(); loop_close()
+    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1)
+    
+    # Check Temp(R2)
+    right(2); clear(); inc(); left(1) # Flag=1
+    loop_open(); right(1); dec(); left(1); clear(); loop_close() # If R2!=0, Flag=0
+    
+    # If Flag=1 (Match), Execute
     right(1)
     loop_open()
-    dec(); left(2)
-    action_func()
-    right(2); clear()
+    dec(); left(3); action_func(); right(3); clear()
     loop_close()
-    left(2)
+    left(3)
 
 def pad_zeros(count):
     right(1); clear(); inc(count // 10)
@@ -96,30 +93,52 @@ def main():
         *p64(0), *p64(load_addr), *p64(load_addr),
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
+    
     emit_bytes(header + prog_header)
     right(1000)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
+    
     right(WALL_POS); clear(); left(WALL_POS)
     right(BUFFER_BASE); clear(); inc(2); left(BUFFER_BASE)
+    
+    # Outer Loop Setup
     left(BUFFER_BASE); right(90); inc(); loop_open()
-    right(10); right(2); loop_open(); right(2); loop_close(); left(2)
+    
+    # Navigation
+    right(10)
+    return_to_cursor_simple()
+    
+    # Read Input
     right(1); inp()
-    loop_open(); left(1); inc(); right(2); inc(); left(1); dec(); loop_close()
-    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1)
-    left(1); clear(); inc(); right(1)
-    loop_open(); left(1); dec(); right(1); clear(); loop_close()
+    
+    # --- Safe EOF Check ---
+    # Data is at R1. Move R1 -> L1, L2.
+    loop_open(); left(1); inc(); left(1); inc(); right(2); dec(); loop_close()
+    
+    # Check L1 (Destructive). Result in L3 (Flag).
+    left(1); clear(); inc(); left(1) # L3=1
+    loop_open(); right(1); dec(); left(1); clear(); loop_close() # If L2(was L1)!=0, L3=0.
+    
+    # If L3=1 (EOF), Flush & Exit
     left(1)
     loop_open()
-    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
+    # Go Home & Flush
+    left(1); loop_open(); left(2); loop_close(); left(WALL_POS)
     right(BUFFER_BASE)
     loop_open(); right(1); out(); right(1); loop_close()
     emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
     pad_zeros(500)
+    # Kill Loops
     left(BUFFER_BASE); right(90); dec(); left(90); right(BUFFER_BASE)
     left(2); dec(); right(2)
     loop_close()
-    right(1)
-    left(1); loop_open(); right(1); inc(); left(1); dec(); loop_close(); right(1)
+    
+    # Restore Data from L2 -> R1
+    right(1) # At L2
+    loop_open(); right(2); inc(); left(2); dec(); loop_close()
+    right(2) # Back to Data(R1)
+    
+    # --- Process Char (Dense Switch) ---
     loop_open()
     sub_and_check(43, lambda: stream_bytes([0xfe, 0x03]))
     sub_and_check(1, lambda: stream_bytes([0xb8, 0x00, 0x00, 0x00, 0x00, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
@@ -127,12 +146,14 @@ def main():
     sub_and_check(1, lambda: stream_bytes([0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
     sub_and_check(14, lambda: stream_bytes([0x48, 0xff, 0xcb]))
     sub_and_check(2, lambda: stream_bytes([0x48, 0xff, 0xc3]))
-    right(1); dec(29); left(1)
-    right(1); dec(2); left(1)
+    right(1); dec(29); left(1) # Skip [
+    right(1); dec(2); left(1) # Skip ]
     clear()
     loop_close()
-    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
-    right(10); loop_close()
+    
+    go_home_from_cursor()
+    left(10)
+    loop_close()
 
 if __name__ == "__main__":
     main()
