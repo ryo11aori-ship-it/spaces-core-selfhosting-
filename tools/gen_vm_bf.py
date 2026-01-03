@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import sys
 
-# --- Spaces Dialect ---
 S = " "
 F = "\u3000"
 
@@ -38,10 +37,6 @@ def Z():
     C()
 
 def main():
-    # Memory Layout:
-    # 99: Accumulator (Data)
-    # 100+: Code Segment
-    
     # 1. Setup Sentinel (255) at 0
     Z()
     I(255)
@@ -61,7 +56,7 @@ def main():
     C()
     R(1)
     
-    # 4. Execution Loop (Bubble Strategy)
+    # 4. Execution Loop
     B()
     
     # Check + (43)
@@ -82,13 +77,12 @@ def main():
     B()
     D()
     L(1)
-    # Action: Increment Accumulator (Left 1)
     L(1)
     I(1)
     R(1)
     C()
     L(1)
-    I(43) # Restore
+    I(43)
     
     # Check - (45)
     D(45)
@@ -108,13 +102,12 @@ def main():
     B()
     D()
     L(1)
-    # Action: Decrement Accumulator (Left 1)
     L(1)
     D(1)
     R(1)
     C()
     L(1)
-    I(45) # Restore
+    I(45)
     
     # Check . (46)
     D(46)
@@ -134,13 +127,12 @@ def main():
     B()
     D()
     L(1)
-    # Action: Output Accumulator (Left 1)
     L(1)
     O()
     R(1)
     C()
     L(1)
-    I(46) # Restore
+    I(46)
     
     # Check , (44)
     D(44)
@@ -160,16 +152,14 @@ def main():
     B()
     D()
     L(1)
-    # Action: Input Accumulator (Left 1)
     L(1)
     N()
     R(1)
     C()
     L(1)
-    I(44) # Restore
+    I(44)
 
-    # --- ADVANCE (SWAP & MOVE) ---
-    # 1. Move Acc (L1) to Temp (R1)
+    # Advance
     L(1)
     B()
     D()
@@ -178,16 +168,12 @@ def main():
     L(2)
     C()
     R(1)
-    
-    # 2. Move Instr (Here) to Acc (L1)
     B()
     D()
     L(1)
     I(1)
     R(1)
     C()
-    
-    # 3. Move Temp (R1) to Instr (Here)
     R(1)
     B()
     D()
@@ -196,8 +182,6 @@ def main():
     R(1)
     C()
     L(1)
-    
-    # 4. Move Head Right
     R(1)
     
     C()
