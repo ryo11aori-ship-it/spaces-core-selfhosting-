@@ -55,22 +55,17 @@ def main():
     C()
     
     # 3. Reset to Start of Code (100)
-    # Scan Left until we find the Accumulator (0) at 99.
     L(1)
     B()
     L(1)
     C()
-    # At 99.
     R(1)
-    # At 100.
     
     # 4. Execution Loop (Bubble Strategy)
-    # Invariant: Head is at Instruction. Left(1) is Accumulator.
     B()
     
     # Check + (43)
     D(43)
-    # Check if 0 (Temp at Right 1)
     R(1)
     Z()
     I(1)
@@ -202,7 +197,7 @@ def main():
     C()
     L(1)
     
-    # 4. Move Head Right (to Next Instruction)
+    # 4. Move Head Right
     R(1)
     
     C()
