@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler (Fix: Indentation Safety & Head-at-End Speedup)
+# Level 1.9: Full BF Compiler (Final Fix: Indentation & Logic Alignment)
 
 import sys
 
@@ -34,16 +34,18 @@ def emit_bytes(vals):
         right(7); inc(); left(7)
 
 def stream_bytes(vals):
+    # Assumes Cursor is at Flag=2. Writes Data, Moves Cursor.
     first = True
     for v in vals:
         if not first:
             right(2)
-        clear(); inc()
+        clear(); inc() # Flag=1
         right(1); clear()
         if v > 0: inc(v)
         left(1)
         first = False
-    right(2); clear(); inc(2)
+    # Create new Cursor
+    right(2); clear(); inc(2) # Flag=2
 
 def go_home_from_cursor():
     left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
@@ -53,6 +55,7 @@ def return_to_cursor_simple():
 
 def compile_bracket_open():
     go_home_from_cursor()
+    # Push C8 to C40 (Simple Stack)
     right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
     right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
     return_to_cursor_simple()
@@ -65,16 +68,41 @@ def compile_bracket_close():
     return_to_cursor_simple()
 
 def sub_and_check(delta, action_func):
+    # Data is at Right 1
     right(1); dec(delta)
+    
+    # Non-destructive check: Copy Data(R1) to Temp(R2)
+    loop_open(); left(1); inc(); right(2); inc(); left(1); dec(); loop_close()
+    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1)
+    
+    # Check Temp(R2)
+    right(2)
+    # Set MatchFlag(R3) = 1
     right(1); clear(); inc(); left(1)
-    loop_open(); right(1); dec(); left(1); loop_open(); left(1); loop_close(); loop_close()
+    # If Temp!=0, Set MatchFlag=0
+    loop_open(); right(1); dec(); left(1); clear(); loop_close()
+    
+    # Check MatchFlag(R3)
     right(1)
     loop_open()
-    dec(); left(2)
-    action_func()
-    right(2)
+        dec() # Clear Flag
+        left(3) # Go to Cursor
+        action_func() # Stream bytes (Moves Cursor)
+        
+        # ALIGNMENT FIX:
+        # We are now at New Cursor.
+        # But the "No Match" path expects us to be at Old Cursor + 3.
+        # We must align so that the common code `left(3)` works.
+        # We need to end up at New Cursor + 3.
+        right(3)
+        # Ensure the cell here is 0 to exit loop
+        clear()
     loop_close()
-    left(2)
+    
+    # Common Return path
+    # If Match: At New Cursor + 3.
+    # If No Match: At Old Cursor + 3.
+    left(3) # Back to Cursor
 
 def pad_zeros(count):
     right(1); clear(); inc(count // 10)
@@ -102,52 +130,47 @@ def main():
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
     
-    # 1. Output Header
     emit_bytes(header + prog_header)
     right(1000)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
     
-    # 2. Setup Buffer
     right(WALL_POS); clear(); left(WALL_POS)
     right(BUFFER_BASE); clear(); inc(2); left(BUFFER_BASE)
     
-    # 3. Main Loop Setup (C90 = Running Flag)
+    # Outer Loop Setup
     left(BUFFER_BASE); right(90); inc(); loop_open()
     
-    # 4. Read Input
-    right(10) # To Buffer Base (100)
+    # Navigation
+    right(10) # To Buffer Base
     return_to_cursor_simple() # To Cursor
-    right(1); inp() # Read to Data Slot
     
-    # 5. EOF Check & Logic
-    # Copy Data to Temp (C-1 relative to Data)
+    # Read Input
+    right(1); inp()
+    
+    # EOF Check
+    # Copy Data(R1) to Temp(L1)
     loop_open(); left(1); inc(); right(2); inc(); left(1); dec(); loop_close()
-    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1) # Restore Data from Temp(Right 1)
+    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1)
     
-    # Check if Data is 0 (EOF)
-    # Using Temp (Left 1)
-    left(1); clear(); inc(); right(1) # Temp=1
-    loop_open(); left(1); dec(); right(1); clear(); loop_close() # If Data!=0, Temp=0
+    # Check Temp(L1)
+    left(1); clear(); inc(); right(1) # Flag=1
+    loop_open(); left(1); dec(); right(1); clear(); loop_close()
     
-    left(1) # At Temp
+    left(1) # At Flag
     loop_open()
-        # EOF Detected! (Temp was 1)
-        # Flush and Exit
+        # EOF Detected (Flag=1)
         go_home_from_cursor()
         right(BUFFER_BASE)
         loop_open(); right(1); out(); right(1); loop_close()
         emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
         pad_zeros(500)
-        # Kill Outer Loop
+        # Kill Loops
         left(BUFFER_BASE); right(90); dec(); left(90); right(BUFFER_BASE)
-        # Kill EOF Flag
         left(2); dec(); right(2)
-        # We are done. The outer loop will terminate.
     loop_close()
     right(1) # Back to Data
     
-    # 6. Process Char (Dense Switch)
-    # Only runs if Data != 0
+    # Process Char (Dense Switch)
     loop_open()
     sub_and_check(43, lambda: stream_bytes([0xfe, 0x03]))
     sub_and_check(1, lambda: stream_bytes([0xb8, 0x00, 0x00, 0x00, 0x00, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
@@ -159,12 +182,11 @@ def main():
     # compile_bracket_open()
     right(1); dec(2); left(1) # Skip ]
     # compile_bracket_close()
-    clear() # Consume Char
+    clear()
     loop_close()
     
-    # 7. Loop Back
     go_home_from_cursor()
-    left(10) # To C90
+    left(10)
     loop_close()
 
 if __name__ == "__main__":
