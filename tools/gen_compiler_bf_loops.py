@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
-# tools/gen_compiler_bf_loops.py (改良版)
-# - cur_pos 管理によりセル移動不整合を防止
-# - emit_byte によりバイト出力を原子的に行う
-# - 生成前に論理的出力量を検査し、診断を stderr に出力する
-# 出力: stdout -> BF (Spaces) ソース
-# 診断: stderr に出力 (GEN_DEBUG=1 で詳細)
+# tools/gen_compiler_bf_loops.py — 改良版（診断強化）
+# 出力: stdout = BF (Spaces) ソース
+# 診断: stderr（CI ログに残る）
+#
+# 環境変数（任意）
+#  - GEN_DEBUG=1         詳細診断ログを出す（stderr）
+#  - OUTPUT_CELL=<int>   出力セル位置（デフォルト 200）
+#  - TARGET_FILE_SIZE=<int>  目標ファイルサイズ（デフォルト 500）
+#  - DUMP_BYTES=1        先頭/末尾バイトを stderr にダンプ（小分割）
+#  - TRUNC_MARKER=1      logical_output の末尾に診断トレーラを書き込む（バイナリ検証用）
+#
+import sys, os, hashlib, textwrap
 
-from __future__ import annotations
-import sys, os
-
-# ----- 言語マッピング（Spaces 方言） -----
+# -----------------------
+# 表現（Spaces 方言）
+# -----------------------
 S = " "        # halfwidth space
 F = "\u3000"   # fullwidth space
 
-def emit(s: str) -> None:
-    """stdout に BF ソース行を出力（改行付き）。"""
-    sys.stdout.write(s + "\n")
+def emit(line: str) -> None:
+    sys.stdout.write(line + "\n")
 
-def dbg(msg: str) -> None:
-    """診断は stderr に出す。環境変数 GEN_DEBUG=1 で詳細出力。"""
-    if os.environ.get("GEN_DEBUG", "0") == "1":
-        sys.stderr.write("GEN_DBG: " + msg + "\n")
-    else:
-        # 常に重要な警告は出力
-        if msg.startswith("WARN:") or msg.startswith("ERROR:"):
-            sys.stderr.write(msg + "\n")
+def eprint(line: str) -> None:
+    sys.stderr.write(line + "\n")
 
-# ----- 低レベル BF 命令（Spaces での表現） -----
+def dbg(line: str) -> None:
+    # Always print WARN/ERROR lines. Otherwise print only if GEN_DEBUG=1.
+    if line.startswith("WARN:") or line.startswith("ERROR:"):
+        eprint(line)
+    elif os.environ.get("GEN_DEBUG", "0") == "1":
+        eprint("DBG: " + line)
+
+# -----------------------
+# 低レベル BF 命令
+# -----------------------
 def raw_right(n=1): emit((S+S+S) * n)
 def raw_left(n=1):  emit((S+S+F) * n)
 def raw_inc(n=1):   emit((S+F+S) * n)
@@ -36,10 +43,11 @@ def raw_inp():      emit(F + S + F)
 def raw_loop_open():  emit(F + F + S)
 def raw_loop_close(): emit(F + F + F)
 
-# ----- 高レベル位置管理 -----
+# -----------------------
+# 位置管理（生成側でテープ位置を追跡）
+# -----------------------
 cur_pos = 0
-def move_by(delta: int) -> None:
-    """相対移動（cur_pos を更新）。"""
+def move_by(delta:int):
     global cur_pos
     if delta > 0:
         raw_right(delta)
@@ -48,146 +56,168 @@ def move_by(delta: int) -> None:
     cur_pos += delta
     dbg(f"move_by({delta}) -> cur_pos={cur_pos}")
 
-def go_to(target: int) -> None:
-    """絶対位置へ移動。"""
+def go_to(target:int):
     global cur_pos
     move_by(target - cur_pos)
 
-def clear_cell() -> None:
-    """現在セルを確実に 0 にする ([-])"""
-    raw_loop_open()
-    raw_dec(1)
-    raw_loop_close()
+def clear_cell():
+    raw_loop_open(); raw_dec(1); raw_loop_close()
 
-def inc_cell(n:int) -> None:
-    if n > 0:
-        raw_inc(n)
+def inc_cell(n:int):
+    if n>0: raw_inc(n)
+def dec_cell(n:int):
+    if n>0: raw_dec(n)
 
-def dec_cell(n:int) -> None:
-    if n > 0:
-        raw_dec(n)
+# -----------------------
+# 論理出力バッファ（先に構築して検査）
+# -----------------------
+logical_output = bytearray()
 
-# ----- 出力の安全化: emit_byte / emit_bytes / stream_bytes -----
-# 出力は必ず OUTPUT_CELL にセットしてから `.` することで
-# 他セルを上書きするリスクを回避する。
-OUTPUT_CELL = int(os.environ.get("OUTPUT_CELL", "200"))  # 必要に応じて小さく（例: 64, 100）
+def p64(v:int)->bytes:
+    return v.to_bytes(8, "little")
+def p32(v:int)->bytes:
+    return v.to_bytes(4, "little")
+
+# -----------------------
+# 診断トレーラ（末尾に付けて変化/切断を検出）
+# -----------------------
+def append_trailer(buf: bytearray):
+    # 末尾に ASCII マーカーと SHA256 の先頭 8 バイトを付与
+    marker = b"GENCHK"
+    h = hashlib.sha256(buf).digest()
+    trailer = marker + h[:8]
+    buf.extend(trailer)
+    dbg(f"Appended trailer: marker={marker} sha8={h[:8].hex()}")
+
+# -----------------------
+# emit_byte: OUTPUT_CELL を使って原子的にバイトを出す
+# -----------------------
+OUTPUT_CELL = int(os.environ.get("OUTPUT_CELL", "200"))
 dbg(f"OUTPUT_CELL={OUTPUT_CELL}")
 
-# 論理的に何バイトを吐くか追跡するためのバッファ（生成前に評価）
-logical_output: list[int] = []
-
-def enqueue_bytes(vals: list[int]) -> None:
-    """論理出力列に追加（実際の BF コード生成は後で行う）。"""
-    logical_output.extend(vals)
-
-def emit_byte(v: int) -> None:
-    """
-    BF 命令列として v を出力する（emit 直接呼び出しバージョン）。
-    - 保存位置（cur_pos の値）に戻るように移動を行う。
-    注意: 生成済み BF 命令数が多くなる点に注意。
-    """
+def emit_byte_as_bf(v:int):
+    """stdout に直接 BF 命令を吐いて 1 バイト出力する（emit_byte 版）"""
+    global cur_pos
     saved = cur_pos
     go_to(OUTPUT_CELL)
     clear_cell()
     if v:
-        # 単純に v 回インクリメント（簡潔・確実）
         inc_cell(v)
     raw_out()
     go_to(saved)
 
-def produce_all_bytes_from_logical() -> None:
-    """logical_output にある順に emit_byte を呼んで BF ソースを出力する。"""
-    dbg(f"Producing {len(logical_output)} bytes via emit_byte")
-    for i, b in enumerate(logical_output):
-        dbg(f"  -> byte[{i}] = {b:02x}")
-        emit_byte(b)
+# ただし今回は logical_output を先に構築してから produce_all_bytes_from_logical() を使う流れ
 
-# ----- ヘッダ作成ユーティリティ -----
-def p64(v:int)->list[int]:
-    return list(v.to_bytes(8, "little"))
-def p32(v:int)->list[int]:
-    return list(v.to_bytes(4, "little"))
-
-# ----- pad 用（論理バイト列に 0 を追加） -----
-def enqueue_pad(count:int) -> None:
-    for _ in range(count):
-        logical_output.append(0)
-
-# ----- main: 論理バイト列を構築し、検査→BF コードを吐く -----
+# -----------------------
+# main: 論理出力を作って検査→BF 命令を出力
+# -----------------------
 def main():
-    # 設定（必要に応じて env で上書き）
+    # 設定
     target_file_size = int(os.environ.get("TARGET_FILE_SIZE", "500"))
-    load_addr = int(os.environ.get("LOAD_ADDR", hex(0x400000)), 16) if isinstance(os.environ.get("LOAD_ADDR"), str) else 0x400000
+    load_addr = 0x400000
     header_len = 120
 
-    dbg(f"target_file_size={target_file_size}, load_addr=0x{load_addr:x}, header_len={header_len}")
+    dbg(f"target_file_size={target_file_size}")
 
-    # ELF ヘッダ（既存ロジックを踏襲）
-    header = [
+    # ELF ヘッダ（簡易、既存のフォーマットを踏襲）
+    header = bytearray([
         0x7f,0x45,0x4c,0x46,0x02,0x01,0x01,0x00,0,0,0,0,0,0,0,0,
-        0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00,
-        *p64(load_addr + header_len), *p64(64), *p64(0), *p32(0),
-        0x40,0x00,0x38,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    ]
-    prog_header = [
-        0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00,
-        *p64(0), *p64(load_addr), *p64(load_addr),
-        *p64(target_file_size), *p64(0x10000), *p64(0x1000)
-    ]
+        0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00
+    ])
+    header.extend(p64(load_addr + header_len))
+    header.extend(p64(64))
+    header.extend(p64(0))
+    header.extend(p32(0))
+    header.extend(bytes([0x40,0x00,0x38,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00]))
 
-    # 基本的なペイロード（短いスタブ、後で必要なら差し替え）
-    code_stub = [0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00]
+    prog_header = bytearray([
+        0x01,0x00,0x00,0x00,0x07,0x00,0x00,0x00
+    ])
+    prog_header.extend(p64(0))
+    prog_header.extend(p64(load_addr))
+    prog_header.extend(p64(load_addr))
+    prog_header.extend(p64(target_file_size))
+    prog_header.extend(p64(0x10000))
+    prog_header.extend(p64(0x1000))
 
-    # 論理出力列を組み立てる（順序通り）
+    # 簡単なコードスタブ（実際の動作は ref_vm 側／compiler_linear.bf に依存）
+    code_stub = bytearray([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
+
+    exit_stub = bytearray([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
+
+    # 論理出力を構築
     logical_output.clear()
     logical_output.extend(header)
     logical_output.extend(prog_header)
     logical_output.extend(code_stub)
-
-    # 最低限ここで EOF 判定/終了シーケンスを加える（既存コードの意図を簡素化）
-    exit_stub = [0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05]
     logical_output.extend(exit_stub)
 
-    # パディング（target_file_size に合わせる）
-    if target_file_size < len(logical_output):
-        sys.stderr.write(f"ERROR: target_file_size ({target_file_size}) is smaller than header+stub ({len(logical_output)}). Aborting.\n")
-        # それでも BF を出すかは設計次第。ここでは続行せず終了。
+    # ここで target_file_size と矛盾する場合は明示的に失敗する
+    if len(logical_output) > target_file_size:
+        eprint(f"ERROR: header+stub size ({len(logical_output)}) > TARGET_FILE_SIZE ({target_file_size})")
         sys.exit(2)
 
     pad_needed = target_file_size - len(logical_output)
-    enqueue_pad(pad_needed)
+    logical_output.extend(b"\x00" * pad_needed)
 
-    # ここまでで「期待される出力バイト列」が logical_output に入っている。
-    # まず診断: ELF マジックとサイズ
-    if len(logical_output) >= 4:
-        magic = logical_output[:4]
-        ok_magic = (magic[0] == 0x7f and magic[1] == 0x45 and magic[2] == 0x4c and magic[3] == 0x46)
-        sys.stderr.write(f"INFO: Logical output size = {len(logical_output)} bytes (target {target_file_size}).\n")
-        sys.stderr.write(f"INFO: ELF magic (expected 7f 45 4c 46) = {'OK' if ok_magic else 'MISMATCH'}; bytes = {' '.join(f'{b:02x}' for b in magic)}\n")
+    # 追加診断トレーラ（任意）
+    if os.environ.get("TRUNC_MARKER", "1") == "1":
+        # Append trailer but ensure final planned size stays target_file_size:
+        # Strategy: compute trailer, then place it into reserved last bytes (overwrite tail).
+        # We'll compute sha256 of current planned content and store marker+sha8 in final bytes.
+        h = hashlib.sha256(logical_output).digest()[:8]
+        marker = b"GENCHK"  # 6 bytes
+        trailer = marker + h  # 14 bytes
+        if len(trailer) <= len(logical_output):
+            # write trailer at very end
+            logical_output[-len(trailer):] = trailer
+            dbg(f"Placed trailer at end: {trailer.hex()}")
+        else:
+            dbg("WARN: trailer longer than planned output; skipping trailer embedding")
+
+    # 基本診断を stderr に出力（CI ログに残る）
+    eprint(f"INFO: Logical output size = {len(logical_output)} bytes (target {target_file_size}).")
+    magic = logical_output[:4]
+    ok_magic = (magic == b"\x7fELF")
+    eprint(f"INFO: ELF magic = {'OK' if ok_magic else 'MISMATCH'}; bytes = {' '.join(f'{b:02x}' for b in magic)}")
+    eprint(f"DEBUG: header bytes = {len(header)}, prog_header bytes = {len(prog_header)}, code_stub bytes = {len(code_stub)}, exit_stub bytes = {len(exit_stub)}")
+
+    # 先頭/末尾の抜粋ダンプ（大きい場合は trunc）
+    if os.environ.get("DUMP_BYTES", "0") == "1":
+        max_show = 64
+        head = logical_output[:max_show]
+        tail = logical_output[-max_show:]
+        eprint("DEBUG: logical_output head: " + " ".join(f"{b:02x}" for b in head))
+        eprint("DEBUG: logical_output tail: " + " ".join(f"{b:02x}" for b in tail))
     else:
-        sys.stderr.write("ERROR: logical_output too small to contain ELF magic.\n")
+        # show compact summary
+        eprint(f"DEBUG: logical_output[0..3] = {' '.join(f'{b:02x}' for b in logical_output[:4])}, tail4 = {' '.join(f'{b:02x}' for b in logical_output[-4:])}")
 
-    # 追加診断（readelf 相当の簡易情報）
-    # e_phoff は header 内に入れてある p64(load_addr + header_len) の直後あたりにある。ここでは簡単に報告。
-    sys.stderr.write(f"DEBUG: header bytes = {len(header)}, prog_header bytes = {len(prog_header)}, code_stub bytes = {len(code_stub)}, exit_stub bytes = {len(exit_stub)}\n")
+    # 追加: SHA256 (短い表示)
+    sha = hashlib.sha256(logical_output).hexdigest()
+    eprint(f"INFO: planned output sha256 (hex, first 16) = {sha[:16]}")
 
-    # BF ソース生成開始（ここから stdout に命令を吐く）
-    # まずワーク領域初期化（BUFFER_BASE 等の概念を保つためのセル初期化）
-    # ここで出力する BF 命令は「ref_vm が期待する Spaces 方言」であることを前提。
-    # note: 以降のemit*は stdout に BF 命令ラインを出力します。
-    # 初期位置は cur_pos == 0 と仮定
+    # ----------------------------
+    # ここから stdout に BF (Spaces) ソース命令を吐き出す
+    # すべてのバイトを emit_byte_as_bf() で出す（原子的）
+    # ----------------------------
+    # 出力が大きいので（target が 500 固定だと問題ないが）必要ならスロットルできます
+    # Reset cur_pos for generation stage
+    global cur_pos
+    cur_pos = 0
 
-    # 出力命令群を作る（logical_output を逐次出力）
-    produce_all_bytes_from_logical()
+    # We'll produce BF commands that emit each planned byte in order.
+    # Because emitting thousands of BF commands can be huge, we keep simple mapping:
+    for i, b in enumerate(logical_output):
+        if i % 100 == 0:
+            dbg(f"producing byte {i}/{len(logical_output)} (0x{b:02x})")
+        emit_byte_as_bf(b)
 
-    # 最後に追加のパディング（BF 側で余剰なゼロを埋めたければここで更に emit_byte(0) を繰り返す）
-    # ただし logical_output に既に pad を入れているためここでは何もしない。
-
-    # 最終診断（stderr）
-    sys.stderr.write(f"INFO: Finished generating BF source. Logical bytes planned: {len(logical_output)}. OUTPUT_CELL={OUTPUT_CELL}\n")
-    if len(logical_output) != target_file_size:
-        sys.stderr.write(f"WARN: Planned output size ({len(logical_output)}) != target_file_size ({target_file_size}).\n")
-    sys.stderr.write("INFO: Note: Diagnostics were printed to stderr. stdout contains only BF (Spaces) source.\n")
+    # Final diagnostic footer (stderr)
+    eprint("INFO: Finished generating BF (Spaces) source to stdout.")
+    eprint("INFO: Diagnostics printed to stderr. stdout contains only BF source lines.")
+    # also print summary to stderr for CI parsing
+    eprint(f"SUMMARY:planned_bytes={len(logical_output)} target={target_file_size} elf_magic_ok={ok_magic} sha256={sha}")
 
 if __name__ == "__main__":
     main()
