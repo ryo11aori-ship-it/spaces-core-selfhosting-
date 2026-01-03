@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Fixed Size & Padding for Self-Hosting
-# Fix: Increased target_file_size to 32KB and added BF-based padding loop.
+# Level 1.9: Fixed Size & Padding
+# Fix: target_file_size -> 64KB, added robust padding loop.
 
 import sys
 
@@ -102,7 +102,7 @@ def check_char(char_code, logic_func):
     right(2); loop_open(); left(3); logic_func(); right(3); clear(); loop_close(); left(3)
 
 def main():
-    target_file_size = 32768 # Increased to 32KB
+    target_file_size = 65536 # 64KB
     load_addr = 0x400000
     header_len = 120
     def p64(v): return list(v.to_bytes(8, "little"))
@@ -146,17 +146,21 @@ def main():
     right(BUFFER_BASE)
     loop_open(); right(1); out(); right(1); loop_close()
     
-    # FAST PADDING: Emit 33000 zeros (330 * 100)
-    # We are at the end of buffer (value 0).
-    inc(100); loop_open()
-    dec(); right(1); inc(330); loop_open()
-    dec(); out(); loop_close()
+    # PADDING LOOP (~60KB)
+    # Re-use cells at start to avoid long seeks
+    left(BUFFER_BASE)
+    right(10); clear(); inc(240) # Outer loop 240
+    loop_open()
+    dec(); right(1); clear(); inc(250) # Inner loop 250
+    loop_open()
+    dec(); right(1); clear(); out(); left(1) # Print 0
+    loop_close()
     left(1)
     loop_close()
-    
-    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
+
+    left(10); left(WALL_POS)
     emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
-    # No more static emit_bytes needed
+    # No more static emit_bytes
 
 if __name__ == "__main__":
     main()
