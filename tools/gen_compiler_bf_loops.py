@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # tools/gen_compiler_bf_loops.py
-# Level 1.9: Full BF Compiler (Linear Self-Host Capable)
+# Level 1.9: Full BF Compiler (Fix: Indentation Safety & Head-at-End Speedup)
 
 import sys
 
@@ -17,6 +17,11 @@ def inp(): emit(F+S+F)
 def loop_open(): emit(F+F+S)
 def loop_close(): emit(F+F+F)
 def clear(): loop_open(); dec(); loop_close()
+
+# Memory Layout
+# C98: Wall (0)
+# C100+: Buffer [Flag, Data]
+# Flag: 1=Filled, 2=Cursor
 
 WALL_POS = 98
 BUFFER_BASE = 100
@@ -40,25 +45,44 @@ def stream_bytes(vals):
         first = False
     right(2); clear(); inc(2)
 
+def go_home_from_cursor():
+    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
+
+def return_to_cursor_simple():
+    right(WALL_POS); loop_open(); right(2); loop_close(); left(2)
+
+def compile_bracket_open():
+    go_home_from_cursor()
+    right(8); loop_open(); dec(); left(7); inc(); right(40); inc(); left(33); loop_close()
+    right(1); loop_open(); dec(); left(1); inc(); right(1); loop_close(); left(1)
+    return_to_cursor_simple()
+    stream_bytes([0x80, 0x3b, 0x00])
+    stream_bytes([0x0f, 0x84, 0x00, 0x00, 0x00, 0x00])
+
+def compile_bracket_close():
+    stream_bytes([0xe9])
+    go_home_from_cursor()
+    return_to_cursor_simple()
+
 def sub_and_check(delta, action_func):
     right(1); dec(delta)
     right(1); clear(); inc(); left(1)
     loop_open(); right(1); dec(); left(1); loop_open(); left(1); loop_close(); loop_close()
     right(1)
     loop_open()
-    dec(); left(2); action_func(); right(2); loop_close()
+    dec(); left(2)
+    action_func()
+    right(2)
+    loop_close()
     left(2)
 
 def pad_zeros(count):
     right(1); clear(); inc(count // 10)
-    loop_open()
-    dec(); left(1)
+    loop_open(); dec(); left(1)
     for _ in range(10):
         right(8); clear(); out(); clear(); left(8)
         right(7); inc(); left(7)
-    right(1)
-    loop_close()
-    left(1)
+    right(1); loop_close(); left(1)
 
 def main():
     target_file_size = 500
@@ -78,42 +102,52 @@ def main():
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
     
+    # 1. Output Header
     emit_bytes(header + prog_header)
     right(1000)
     emit_bytes([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
     
+    # 2. Setup Buffer
     right(WALL_POS); clear(); left(WALL_POS)
     right(BUFFER_BASE); clear(); inc(2); left(BUFFER_BASE)
     
+    # 3. Main Loop Setup (C90 = Running Flag)
     left(BUFFER_BASE); right(90); inc(); loop_open()
-    right(10); right(2); loop_open(); right(2); loop_close(); left(2)
-    right(1); inp()
     
-    # EOF Check: If Data(R1) is 0, Flush & Exit
-    loop_open(); left(1); inc(); right(1); loop_open(); left(1); dec(); right(1); loop_close(); loop_close()
-    # Now if Data was 0, C[-1] is 1. If Data!=0, C[-1] is 0.
-    left(1)
+    # 4. Read Input
+    right(10) # To Buffer Base (100)
+    return_to_cursor_simple() # To Cursor
+    right(1); inp() # Read to Data Slot
+    
+    # 5. EOF Check & Logic
+    # Copy Data to Temp (C-1 relative to Data)
+    loop_open(); left(1); inc(); right(2); inc(); left(1); dec(); loop_close()
+    right(1); loop_open(); left(1); inc(); right(1); dec(); loop_close(); left(1) # Restore Data from Temp(Right 1)
+    
+    # Check if Data is 0 (EOF)
+    # Using Temp (Left 1)
+    left(1); clear(); inc(); right(1) # Temp=1
+    loop_open(); left(1); dec(); right(1); clear(); loop_close() # If Data!=0, Temp=0
+    
+    left(1) # At Temp
     loop_open()
-       # EOF DETECTED!
-       left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
-       right(BUFFER_BASE)
-       loop_open(); right(1); out(); right(1); loop_close()
-       emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
-       pad_zeros(500)
-       loop_open(); loop_close() # Trap
+        # EOF Detected! (Temp was 1)
+        # Flush and Exit
+        go_home_from_cursor()
+        right(BUFFER_BASE)
+        loop_open(); right(1); out(); right(1); loop_close()
+        emit_bytes([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
+        pad_zeros(500)
+        # Kill Outer Loop
+        left(BUFFER_BASE); right(90); dec(); left(90); right(BUFFER_BASE)
+        # Kill EOF Flag
+        left(2); dec(); right(2)
+        # We are done. The outer loop will terminate.
     loop_close()
     right(1) # Back to Data
     
-    # Restore Data from copy? No copy made to save space.
-    # But Dense Switch needs Data.
-    # We destroyed Data in check?
-    # The check `loop_open ... loop_close` on Data zeroed it!
-    # We need non-destructive check.
-    # Restore: logic above did: `inc` target, then loop `dec` target.
-    # So C[-1] has the value!
-    left(1); loop_open(); right(1); inc(); left(1); dec(); loop_close(); right(1)
-    # Data Restored.
-    
+    # 6. Process Char (Dense Switch)
+    # Only runs if Data != 0
     loop_open()
     sub_and_check(43, lambda: stream_bytes([0xfe, 0x03]))
     sub_and_check(1, lambda: stream_bytes([0xb8, 0x00, 0x00, 0x00, 0x00, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
@@ -121,13 +155,17 @@ def main():
     sub_and_check(1, lambda: stream_bytes([0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]))
     sub_and_check(14, lambda: stream_bytes([0x48, 0xff, 0xcb]))
     sub_and_check(2, lambda: stream_bytes([0x48, 0xff, 0xc3]))
-    right(1); dec(29); left(1)
-    right(1); dec(2); left(1)
-    clear()
+    right(1); dec(29); left(1) # Skip [
+    # compile_bracket_open()
+    right(1); dec(2); left(1) # Skip ]
+    # compile_bracket_close()
+    clear() # Consume Char
     loop_close()
     
-    left(2); loop_open(); left(2); loop_close(); left(WALL_POS)
-    right(10); loop_close()
+    # 7. Loop Back
+    go_home_from_cursor()
+    left(10) # To C90
+    loop_close()
 
 if __name__ == "__main__":
     main()
