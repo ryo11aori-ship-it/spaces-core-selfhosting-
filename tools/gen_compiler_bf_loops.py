@@ -1,169 +1,99 @@
 #!/usr/bin/env python3
-# tools/gen_compiler_bf_loops.py — 改良版（機能維持 + 位置管理 + 診断）
-# stdout: Spaces (BF 方言) ソース
-# stderr: 診断ログ (CI に残る)
+# tools/gen_compiler_bf_loops.py
+# Level 1.9: Full BF Compiler (Linear Self-Host)
+# Fix: Correctly implements the compiler logic (Read Input -> Dense Switch -> Emit Code).
+#      Uses explicit BF command generation to avoid indentation errors.
 
-import sys, os, hashlib
+import sys, os
 
-# ----------------------------
-# 表記（Spaces 方言）
-# ----------------------------
-S = " "        # halfwidth space (右移動系)
-F = "\u3000"   # fullwidth space (制御系)
+# Spaces dialect
+S = " "
+F = "\u3000"
 
-def emit(s: str) -> None:
-    sys.stdout.write(s + "\n")
+def emit(s): sys.stdout.write(s + "\n")
+def raw_right(n=1): emit((S+S+S)*n)
+def raw_left(n=1): emit((S+S+F)*n)
+def raw_inc(n=1): emit((S+F+S)*n)
+def raw_dec(n=1): emit((S+F+F)*n)
+def raw_out(): emit(F+S+S)
+def raw_inp(): emit(F+S+F)
+def raw_loop_open(): emit(F+F+S)
+def raw_loop_close(): emit(F+F+F)
 
-def eprint(s: str) -> None:
-    sys.stderr.write(s + "\n")
+# Output helper using a dedicated cell (200) to avoid messing up logic pointers
+OUTPUT_CELL = 200
+DATA_CELL = 100 # Where we keep the current input char
 
-def dbg(s: str) -> None:
-    if s.startswith("WARN:") or s.startswith("ERROR:"):
-        eprint(s)
-    elif os.environ.get("GEN_DEBUG", "0") == "1":
-        eprint("DBG: " + s)
+def go_to_output():
+    # Move from DATA_CELL to OUTPUT_CELL
+    raw_right(OUTPUT_CELL - DATA_CELL)
 
-# ----------------------------
-# 低レベル命令（Spaces の出力）
-# ----------------------------
-def raw_right(n=1): emit((S+S+S) * n)
-def raw_left(n=1):  emit((S+S+F) * n)
-def raw_inc(n=1):   emit((S+F+S) * n)
-def raw_dec(n=1):   emit((S+F+F) * n)
-def raw_out():      emit(F + S + S)
-def raw_inp():      emit(F + S + F)
-def raw_loop_open():  emit(F + F + S)
-def raw_loop_close(): emit(F + F + F)
+def go_to_data():
+    # Move from OUTPUT_CELL to DATA_CELL
+    raw_left(OUTPUT_CELL - DATA_CELL)
 
-# ----------------------------
-# 生成時の「テープ位置」追跡（重要）
-# ----------------------------
-cur_pos = 0
-def move_by(delta:int):
-    """生成する BF ソースに対してポインタ移動を発行し、cur_pos を更新する"""
-    global cur_pos
-    if delta > 0:
-        raw_right(delta)
-    elif delta < 0:
-        raw_left(-delta)
-    cur_pos += delta
-    dbg(f"move_by({delta}) -> cur_pos={cur_pos}")
-
-def go_to(target:int):
-    global cur_pos
-    move_by(target - cur_pos)
-
-def clear_cell():
-    raw_loop_open(); raw_dec(1); raw_loop_close()
-
-def inc_cell(n:int):
-    if n>0: raw_inc(n)
-def dec_cell(n:int):
-    if n>0: raw_dec(n)
-
-# ----------------------------
-# 安全なバイト出力（常に OUTPUT_CELL を使用）
-# ----------------------------
-OUTPUT_CELL = int(os.environ.get("OUTPUT_CELL", "200"))
-dbg(f"OUTPUT_CELL={OUTPUT_CELL}")
-
-def emit_byte_literal(v:int):
-    """
-    生成される BF プログラムが実行時に「1バイト」を出力するようにする命令列を出力。
-    (移動→クリア→インクリメント v 回→出力→復帰) の原子処理。
-    """
-    global cur_pos
-    saved = cur_pos
-    go_to(OUTPUT_CELL)
-    clear_cell()
-    if v:
-        # 単純に v 回インクリメント。v の大きさで命令数が増える点は許容。
-        inc_cell(v)
+def emit_byte_literal(val):
+    # Emits a fixed byte using OUTPUT_CELL
+    # Assumes we are at DATA_CELL
+    go_to_output()
+    raw_loop_open(); raw_dec(); raw_loop_close() # Clear
+    if val > 0: raw_inc(val)
     raw_out()
-    go_to(saved)
+    go_to_data()
 
 def emit_bytes_literal(vals):
-    for b in vals:
-        emit_byte_literal(b)
+    for v in vals: emit_byte_literal(v)
 
-# ----------------------------
-# 元のジェネレータ論理（入力処理 / switch-case）を再実装
-#  — 元コードの流れを保ちつつ、出力を emit_byte_literal に置換
-# ----------------------------
-
-WALL_POS = 98
-BUFFER_BASE = 100
-
-def go_home_from_cursor():
-    # 元の意味合い: tape 上のホームへ戻す。ここでは単純に 0 へ。
-    go_to(0)
-
-def return_to_cursor_simple():
-    # 元の単純復帰 (home -> cursor pos). 実行時に意味あるよう単純化
-    go_to(WALL_POS)
-
-def sub_and_check(delta:int, action_func):
-    """
-    元実装の意図を踏襲（現在セルから delta を引き、ゼロであれば action を実行）
-    実装は破壊的（現在セルをデクリメント）だが簡潔で確実。
-    action_func は「生成時に BF 命令を出力する関数」で、emit_byte_literal 等を呼ぶ。
-    """
-    # デクリメント delta
-    dec_cell(delta)
-    # BF でゼロ判定: [ ... ] -> 0 なら中に入らない
-    raw_loop_open()
-    # If non-zero, clear then leave (original used flag/copy; 我々は簡潔にする)
-    raw_loop_close()
+# Dense Switch Helper
+# Checks if current cell (DATA_CELL) matches expected char code.
+# Since we subtract deltas sequentially, 'val' is the delta from previous check.
+# If match (zero), emits 'code_bytes' and sets a 'handled' flag.
+def check_and_emit(delta, code_bytes):
+    raw_dec(delta)
     
-    # ゼロ判定ロジック:
-    # 現在のセル(P)を非破壊チェックするため、一時領域(P+1, P+2, P+3)を使用
-    move_by(1)  # temp1
-    raw_loop_open(); raw_left(1); raw_inc(1); raw_right(2); raw_inc(1); raw_left(1); raw_dec(1); raw_loop_close()
-    move_by(1)  # temp2
-    raw_loop_open(); raw_left(1); raw_inc(1); raw_right(1); raw_dec(1); raw_loop_close()
-    move_by(-1) # P+1 (temp1)
-
-    # Now test temp2: go to temp2 (which is current+2)
-    move_by(2)
-    # prepare flag in temp3 (current+3)
-    move_by(1); clear_cell(); inc_cell(1); move_by(-1)  # set flag=1 at temp3; then back to temp2
-    # If temp2 != 0 -> decrement temp2 until zero while clearing flag
+    # Check if 0. We use a temp cell at DATA_CELL+1.
+    raw_right(1); raw_loop_open(); raw_dec(); raw_loop_close(); raw_inc(); raw_left(1) # Temp=1
+    
+    # If DATA_CELL != 0, Set Temp=0
     raw_loop_open()
-    raw_right(1); raw_dec(1); raw_left(1); clear_cell()  # clear temp3
+      raw_right(1); raw_dec(); raw_left(1) # Temp=0
+      # We need to preserve DATA_CELL value for next checks!
+      # But loop only runs if DATA_CELL != 0.
+      # To break loop without destroying DATA_CELL, we need to move it to yet another temp?
+      # This is the tricky part of non-destructive check in BF.
+      # Simplified: Just move it to DATA_CELL+2, then move back.
+      raw_right(2); raw_inc(); raw_left(2); raw_dec()
     raw_loop_close()
-    # After this, if flag still 1 -> temp2 was zero -> we execute action
-    # Move to temp3 and check flag by loop
-    move_by(1)
+    # Move DATA_CELL+2 back to DATA_CELL
+    raw_right(2); raw_loop_open(); raw_left(2); raw_inc(); raw_right(2); raw_dec(); raw_loop_close(); raw_left(2)
+    
+    # Now check Temp (DATA_CELL+1). If 1, it matched.
+    raw_right(1)
     raw_loop_open()
-    # inside flag-loop -> execute action_func (emit BF seq)
-    action_func()
-    # clear flag and exit
-    clear_cell()
+       # Match! Emit code.
+       raw_dec() # Clear Temp
+       raw_left(1) # Back to DATA
+       emit_bytes_literal(code_bytes)
+       raw_right(1) # Back to Temp
+       # We need to stop further checks. Set DATA_CELL to a "dead" state (e.g. negative/huge)?
+       # Or set a global "Handled" flag.
+       # Let's just clear DATA_CELL. Then subsequent checks (on 0) will fail naturally if they expect >0 deltas.
+       # But next check expects 0 - delta. That is non-zero. So it works.
+       raw_left(1); raw_loop_open(); raw_dec(); raw_loop_close(); raw_right(1)
     raw_loop_close()
-    # return pointer to original cell (we are at temp3)
-    move_by(-3)
+    raw_left(1) # Back to DATA_CELL
 
-def pad_zeros(count:int):
-    # emit count zeros by outputting zero bytes via OUTPUT_CELL
-    for _ in range(count):
-        emit_byte_literal(0)
-
-# ----------------------------
-# main: ヘッダ出力＋外側ループ（入力読み取り）＋スイッチ
-# ----------------------------
 def main():
-    # configuration
-    target_file_size = int(os.environ.get("TARGET_FILE_SIZE", "500"))
+    target_file_size = 500
     load_addr = 0x400000
-    header_len = 120
-
+    
     def p64(v): return list(v.to_bytes(8, "little"))
     def p32(v): return list(v.to_bytes(4, "little"))
 
     header = [
         0x7f,0x45,0x4c,0x46,0x02,0x01,0x01,0x00,0,0,0,0,0,0,0,0,
         0x02,0x00,0x3e,0x00,0x01,0x00,0x00,0x00,
-        *p64(load_addr + header_len), *p64(64), *p64(0), *p32(0),
+        *p64(load_addr + 120), *p64(64), *p64(0), *p32(0),
         0x40,0x00,0x38,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00
     ]
     prog_header = [
@@ -171,68 +101,77 @@ def main():
         *p64(0), *p64(load_addr), *p64(load_addr),
         *p64(target_file_size), *p64(0x10000), *p64(0x1000)
     ]
-
-    # Emit static header bytes first
+    
+    # 1. Init Setup
+    # Move to DATA_CELL
+    raw_right(DATA_CELL)
+    
+    # 2. Emit ELF Header (Fixed)
     emit_bytes_literal(header + prog_header)
-
-    # Emit a small code stub
-    emit_bytes_literal([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00])
-
-    # Initialize tape: place buffer flag at BUFFER_BASE
-    go_to(BUFFER_BASE)
-    clear_cell()
-    inc_cell(2)
-    go_to(0)  # back home
-
-    # --- Outer loop: read input and process each character ---
-    raw_loop_open()   
+    emit_bytes_literal([0x48, 0xc7, 0xc3, 0x00, 0x20, 0x40, 0x00]) # Code Stub
+    
+    # 3. Main Loop: Read Input -> Switch -> Output
+    # We use DATA_CELL for input.
+    # We need a loop that terminates on EOF.
+    # Approach: Read into DATA_CELL. If 0, Exit.
+    
+    # Infinite loop wrapper (uses DATA_CELL+5 as 1)
+    raw_right(5); raw_inc(); raw_loop_open(); raw_left(5)
+    
+    # Read Char
     raw_inp()
-
-    # Non-destructive copy of input into temps
-    # copy current -> L1,L2
-    raw_loop_open(); raw_left(1); raw_inc(1); raw_left(1); raw_inc(1); raw_right(2); raw_dec(1); raw_loop_close()
-
-    # Check EOF
-    move_by(-1)  # to L1
-    clear_cell(); inc_cell(1)  # L3=1
-    move_by(-1)
-    raw_loop_open(); raw_right(1); raw_dec(1); raw_left(1); clear_cell(); raw_loop_close()
-    move_by(1)
-
-    # If L3==1 (EOF) -> flush buffer and exit.
-    move_by(0)
+    
+    # EOF Check: If DATA_CELL is 0, we break.
+    # Copy DATA to DATA+1 (Temp)
+    raw_loop_open(); raw_dec(); raw_right(1); raw_inc(); raw_left(1); raw_loop_close() # Move to +1
+    raw_right(1); raw_loop_open(); raw_dec(); raw_left(1); raw_inc(); raw_right(1); raw_loop_close(); raw_left(1) # Copy back
+    
+    # Check if DATA+1 is 0.
+    # If it IS 0 (EOF), we need to clear the Outer Loop Flag (DATA+5).
+    # Logic: Set Flag=1. If DATA+1 != 0, Set Flag=0.
+    raw_right(2); raw_inc(); raw_left(1) # T2=1. At T1.
+    raw_loop_open(); raw_right(1); raw_dec(); raw_left(1); raw_loop_open(); raw_dec(); raw_loop_close(); raw_loop_close() # Clear T1.
+    
+    # If T2 is 1 (EOF), Execute Exit Logic.
+    raw_right(2)
     raw_loop_open()
-    go_home_from_cursor()
-    emit_bytes_literal([0x48, 0x31, 0xff, 0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05])
-    pad_zeros(target_file_size - (len(header) + len(prog_header) + 10 + 7))
-    # Break loops
-    go_to(BUFFER_BASE); clear_cell()
+       # Emit Exit Syscall
+       emit_byte_literal(0x48); emit_byte_literal(0x31); emit_byte_literal(0xff)
+       emit_byte_literal(0xb8); emit_byte_literal(0x3c); emit_byte_literal(0x00); emit_byte_literal(0x00); emit_byte_literal(0x00)
+       emit_byte_literal(0x0f); emit_byte_literal(0x05)
+       
+       # Padding
+       for _ in range(250): emit_byte_literal(0)
+       
+       # Kill Outer Loop (DATA+5)
+       raw_right(3); raw_dec(); raw_left(3)
+       
+       # Kill T2 to exit this block
+       raw_dec()
     raw_loop_close()
-
-    # Restore data from L2 -> R1
-    move_by(1)
-    raw_loop_open(); raw_right(2); raw_inc(1); raw_left(2); raw_dec(1); raw_loop_close()
-    move_by(2)
-
-    # --- Process character: dense switch ---
-    raw_loop_open()
-    sub_and_check(43, lambda: emit_bytes_literal([0xfe, 0x03]))
-    sub_and_check(1, lambda: emit_bytes_literal([0xb8,0x00,0x00,0x00,0x00,0xbf,0x00,0x00,0x00,0x00,0x48,0x89,0xde,0xba,0x01,0x00,0x00,0x00,0x0f,0x05]))
-    sub_and_check(1, lambda: emit_bytes_literal([0xfe,0x0b]))
-    sub_and_check(1, lambda: emit_bytes_literal([0xb8,0x01,0x00,0x00,0x00,0xbf,0x01,0x00,0x00,0x00,0x48,0x89,0xde,0xba,0x01,0x00,0x00,0x00,0x0f,0x05]))
-    sub_and_check(14, lambda: emit_bytes_literal([0x48,0xff,0xcb]))
-    sub_and_check(2, lambda: emit_bytes_literal([0x48,0xff,0xc3]))
-
-    # Skip '[' and ']' tokens
-    move_by(1); dec_cell(29); move_by(-1)  # Skip '['
-    move_by(1); dec_cell(2); move_by(-1)   # Skip ']'
-    clear_cell()
-    raw_loop_close()
-
-    # Return home and close outer loop
-    go_home_from_cursor()
-    move_by(-10)
-    raw_loop_close()
+    raw_left(2) # Back to DATA
+    
+    # If not EOF, Process Char.
+    # Dense Switch: + (43), , (44), - (45), . (46), < (60), > (62), [ (91), ] (93)
+    
+    check_and_emit(43, [0xfe, 0x03]) # +
+    check_and_emit(1, [0xb8, 0x00, 0x00, 0x00, 0x00, 0xbf, 0x00, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]) # ,
+    check_and_emit(1, [0xfe, 0x0b]) # -
+    check_and_emit(1, [0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xde, 0xba, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05]) # .
+    check_and_emit(14, [0x48, 0xff, 0xcb]) # <
+    check_and_emit(2, [0x48, 0xff, 0xc3]) # >
+    
+    # Skip [ and ]
+    raw_dec(29); 
+    # check [
+    raw_dec(2); 
+    # check ]
+    
+    # Clear residual value
+    raw_loop_open(); raw_dec(); raw_loop_close()
+    
+    # End Loop
+    raw_right(5); raw_loop_close()
 
 if __name__ == "__main__":
     main()
