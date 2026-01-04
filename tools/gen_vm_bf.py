@@ -37,6 +37,7 @@ def Z():
     C()
 
 def DEBUG(char_code):
+    """Prints a debug character without disturbing the tape state significantly."""
     R(1)
     Z()
     I(char_code)
@@ -45,6 +46,10 @@ def DEBUG(char_code):
     L(1)
 
 def main():
+    # Memory Layout:
+    # 99: Accumulator (Data)
+    # 100+: Code Segment
+    
     # Diagnostic: Start 'S'
     DEBUG(83)
     
@@ -79,39 +84,120 @@ def main():
     R(100)
     
     B()
+    
     # Check + (43)
     D(43)
-    R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-    R(1); B(); D(); L(1)
+    R(1)
+    Z()
+    I(1)
+    L(1)
+    B()
+    R(1)
+    D()
+    L(1)
+    B()
+    L(1)
+    C()
+    C()
+    R(1)
+    B()
+    D()
+    L(1)
+    
     # Action +
-    L(1); I(1); R(1)
-    C(); L(1); I(43)
+    DEBUG(43) # '+'
+    L(1)
+    I(1)
+    R(1)
+    C()
+    L(1)
+    I(43) # Restore
     
     # Check - (45)
     D(45)
-    R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-    R(1); B(); D(); L(1)
+    R(1)
+    Z()
+    I(1)
+    L(1)
+    B()
+    R(1)
+    D()
+    L(1)
+    B()
+    L(1)
+    C()
+    C()
+    R(1)
+    B()
+    D()
+    L(1)
+    
     # Action -
-    L(1); D(1); R(1)
-    C(); L(1); I(45)
+    DEBUG(45) # '-'
+    L(1)
+    D(1)
+    R(1)
+    C()
+    L(1)
+    I(45) # Restore
     
     # Check . (46)
     D(46)
-    R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-    R(1); B(); D(); L(1)
-    # Action .
-    L(1); O(); R(1)
-    C(); L(1); I(46)
+    R(1)
+    Z()
+    I(1)
+    L(1)
+    B()
+    R(1)
+    D()
+    L(1)
+    B()
+    L(1)
+    C()
+    C()
+    R(1)
+    B()
+    D()
+    L(1)
+    
+    # Action . (Output)
+    # No debug print to keep output clean, or use 'o' if needed
+    L(1)
+    O()
+    R(1)
+    C()
+    L(1)
+    I(46) # Restore
     
     # Check , (44)
     D(44)
-    R(1); Z(); I(1); L(1); B(); R(1); D(); L(1); B(); L(1); C(); C()
-    R(1); B(); D(); L(1)
-    # Action ,
-    L(1); N(); R(1)
-    C(); L(1); I(44)
+    R(1)
+    Z()
+    I(1)
+    L(1)
+    B()
+    R(1)
+    D()
+    L(1)
+    B()
+    L(1)
+    C()
+    C()
+    R(1)
+    B()
+    D()
+    L(1)
     
-    # Advance
+    # Action ,
+    DEBUG(44) # ','
+    L(1)
+    N()
+    R(1)
+    C()
+    L(1)
+    I(44) # Restore
+    
+    # Advance (Bubble Move)
     L(1)
     B()
     D()
@@ -135,7 +221,8 @@ def main():
     C()
     L(1)
     R(1)
-    C()
+    
+    C() # End of Main Loop
     
     # Diagnostic: End 'E'
     L(100)
