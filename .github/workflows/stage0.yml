@@ -11,9 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Reference VM (C implementation)
+      - name: Build Reference VM (Unbuffered)
         run: |
           mkdir -p bin
+          # stdoutのバッファリングを無効化する行をmain関数の先頭に挿入
+          sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
@@ -26,29 +28,23 @@ jobs:
         id: run-vm
         run: |
           echo "Testing vm.spaces logic..."
-          # Test Source: Output 'A'
           echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > test_A.bf
           
-          # 実行 (タイムアウト120秒)
-          # タイムアウトしてもアーティファクトアップロードに進むようにする
-          timeout 120s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt || true
+          # タイムアウトを少し短縮してもログが出るはず
+          timeout 60s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt || true
           
-          echo "Output content (Partial):"
+          echo "Output content:"
           cat output.txt
           
-          # 判定ロジック
           if grep -q "A" output.txt; then
              echo "🎉 SUCCESS: VM Logic is correct!"
           else
              echo "❌ FAILED: VM Logic mismatch or Timeout."
-             # ここで exit 1 すると upload が走らない可能性があるため、
-             # 判定結果はログに出しつつ、ステップ自体はエラーにするが
-             # 次のステップ(Upload)は if: always() で実行させる
              exit 1
           fi
 
       - name: Upload Debug Artifacts
-        if: always() # 成功・失敗・タイムアウトに関わらず実行
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vm-debug-artifacts
