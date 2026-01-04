@@ -18,22 +18,18 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      # 復活させたステップ: VMのソースコードを生成
       - name: Generate VM Source (Spaces)
         run: |
           mkdir -p spaces/self
           python3 tools/gen_vm_bf.py > spaces/self/vm.spaces
 
-      # コンパイラのソースコードを生成
       - name: Generate Compiler (Spaces)
         run: |
-          # mkdir -p spaces/self (重複するので省略可だが念のためあっても良い)
           python3 tools/gen_compiler_bf.py > spaces/self/compiler.spaces
 
       - name: Compile VM using Spaces Compiler
         run: |
           echo "Compiling vm.spaces using compiler.spaces..."
-          # compiler.spaces (BF) を実行し、vm.spaces を入力として与え、vm.elf を出力させる
           timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/vm.spaces > vm.elf
           chmod +x vm.elf
           ls -l vm.elf
@@ -41,7 +37,6 @@ jobs:
       - name: Run Generated ELF
         run: |
           echo "Running vm.elf..."
-          # 現状の仮コンパイラは、入力を無視して「Aを出力するだけのELF」を生成します
           ./vm.elf > output.txt
           cat output.txt
           
