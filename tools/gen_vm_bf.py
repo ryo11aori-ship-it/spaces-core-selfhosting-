@@ -37,7 +37,6 @@ def Z():
     C()
 
 def DEBUG(char_code):
-    """Prints a debug character without disturbing the tape state significantly."""
     R(1)
     Z()
     I(char_code)
@@ -46,12 +45,16 @@ def DEBUG(char_code):
     L(1)
 
 def main():
-    # Memory Layout:
-    # 99: Accumulator (Data)
-    # 100+: Code Segment
+    # SAFETY: Move right 1000 cells to prevent underflow during left scans.
+    R(1000)
     
     # Diagnostic: Start 'S'
     DEBUG(83)
+    
+    # Memory Layout (Relative to 1000):
+    # 0: Sentinel (255)
+    # 1-99: Registers / Gap
+    # 100+: Code Segment
     
     # 1. Setup Sentinel (255) at 0
     Z()
@@ -66,22 +69,53 @@ def main():
     C()
     
     # Diagnostic: Read Done 'R'
-    L(100)
-    DEBUG(82)
-    R(100)
+    # We are at EOF (0).
+    # We need to go back to 100.
+    # Safe Scan Left: Scan until we hit a 0 value in the GAP (1-99).
+    # Since 1-99 are 0, and Code is non-zero, this works.
+    # BUT, we might overshoot if Code contains 0?
+    # BF Code shouldn't contain 0.
     
-    # 3. Reset to Start of Code (100)
+    # To be safer: We scan left until we hit 255 (Sentinel at 0).
     L(1)
     B()
+    # Check if 255
+    # Copy current to Temp(R1)
+    # Subtract 255. If 0, we found it.
+    # If not 0, Restore and Move Left.
+    
+    # Simplified Scan: Just scan left until non-zero? No, code is non-zero.
+    # Scan left until 255?
+    # Or just scan left until we hit the Gap (0)?
+    # Assuming code doesn't have 0.
+    
+    # Let's try the Gap Scan again, but with Headroom, it won't crash even if it goes too far.
     L(1)
     C()
-    R(1)
     
-    # 4. Execution Loop
+    DEBUG(82) # 'R'
+    
+    # Now we are at the Gap (somewhere 1-99).
+    # We need to go Right to 100.
+    # Scan Right until Non-Zero?
+    R(1)
+    B()
+    # If 0, R(1).
+    # Wait, how to scan for non-zero in a sea of zeros?
+    # [>]+ logic? No.
+    # We know 100 is start.
+    # We are at 99 (likely).
+    # Just move R(1).
+    # If we overshoot left scan into 0..99, we are at largest 0 index.
+    # Actually, the loop `L(1); B(); L(1); C()` stops at the FIRST 0 it finds from the right.
+    # So it stops at 99.
+    # So we are at 99.
+    # Move R(1) -> 100.
+    # This is correct.
+    
+    # 3. Execution Loop
     # Diagnostic: Loop Start 'L'
-    L(100)
     DEBUG(76)
-    R(100)
     
     B()
     
@@ -105,41 +139,17 @@ def main():
     L(1)
     
     # Action +
-    DEBUG(43) # '+'
+    # We need to access Data Tape.
+    # Data Tape is far away? No, we use Bubble Strategy.
+    # Left(1) is Accumulator.
+    # Left(1) relative to 1000+ is safe.
     L(1)
     I(1)
     R(1)
+    
     C()
     L(1)
     I(43) # Restore
-    
-    # Check - (45)
-    D(45)
-    R(1)
-    Z()
-    I(1)
-    L(1)
-    B()
-    R(1)
-    D()
-    L(1)
-    B()
-    L(1)
-    C()
-    C()
-    R(1)
-    B()
-    D()
-    L(1)
-    
-    # Action -
-    DEBUG(45) # '-'
-    L(1)
-    D(1)
-    R(1)
-    C()
-    L(1)
-    I(45) # Restore
     
     # Check . (46)
     D(46)
@@ -161,41 +171,13 @@ def main():
     L(1)
     
     # Action . (Output)
-    # No debug print to keep output clean, or use 'o' if needed
     L(1)
     O()
     R(1)
+    
     C()
     L(1)
     I(46) # Restore
-    
-    # Check , (44)
-    D(44)
-    R(1)
-    Z()
-    I(1)
-    L(1)
-    B()
-    R(1)
-    D()
-    L(1)
-    B()
-    L(1)
-    C()
-    C()
-    R(1)
-    B()
-    D()
-    L(1)
-    
-    # Action ,
-    DEBUG(44) # ','
-    L(1)
-    N()
-    R(1)
-    C()
-    L(1)
-    I(44) # Restore
     
     # Advance (Bubble Move)
     L(1)
@@ -225,9 +207,7 @@ def main():
     C() # End of Main Loop
     
     # Diagnostic: End 'E'
-    L(100)
     DEBUG(69)
-    R(100)
 
 if __name__ == "__main__":
     main()
