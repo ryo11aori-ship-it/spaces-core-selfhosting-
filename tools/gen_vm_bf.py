@@ -56,27 +56,24 @@ def main():
     N()
     C()
     DEBUG(82)
-    L(1)
+    
+    # --- Reset Logic Fixed ---
+    L(2) # Move to last Code slot
     B()
-    L(2)
+    L(2) # Scan Left stride 2
     C()
-    R(2)
+    R(2) # Move to Start Code
+    
     DEBUG(76)
     B()
     
-    # Relative Check Chain:
-    # Order: + (43), , (44), - (45), . (46)
-    # L(1) is Current Instr.
-    
     # --- Check + (43) ---
     D(43)
-    # Check if L(1) == 0. Use L(3) as Flag, L(2) as Scratch.
-    # Set Flag L(3) = 1
+    # Zero Check L(1) using L(3) as Flag, L(2) as Scratch
     L(3)
     Z()
     I(1)
     R(3)
-    # Copy L(1) to L(2)
     L(1)
     B()
     L(1)
@@ -87,36 +84,19 @@ def main():
     L(2)
     B()
     R(1)
-    I(1) # Restore L(1)
-    L(2) # At L(2)
-    I(1) # Restore L(2)?? No, logic is complex flat.
-    # Simple Zero Check:
-    # L(1) is value.
-    # L(2) = 0.
-    # L(1) [ L(2)+ L(1)- ] L(2) [ L(1)+ L(2)- ]
-    # This restores L(1).
-    # Check Logic:
-    # Flag = 1.
-    # L(1) [ Flag=0. L(2)+ L(1)- ] L(2) [ L(1)+ L(2)- ]
-    D() # L(2)--
+    I(1)
+    L(1)
+    D()
     C()
-    # Now if L(1) was 0, Flag(L3) is 1. If !=0, Flag is 0.
-    # L(1) is restored.
-    
-    # Let's verify Zero Check Pattern:
-    # Temp(L2) [-]
-    # Flag(L3) [-]+
-    # Val(L1) [ L3[-] L2+ L1- ]
-    # L2 [ L1+ L2- ]
     L(2)
     Z()
     L(1)
-    I(1) # Flag L(3)=1
+    I(1)
     R(2)
     L(1)
     B()
     L(2)
-    Z() # Flag=0
+    Z()
     R(1)
     I(1)
     L(1)
@@ -129,12 +109,10 @@ def main():
     R(1)
     D()
     C()
-    # Check Flag (L3)
     L(3)
     B()
-    D() # Zero Flag
-    R(3) # At R(0)=Head
-    # Action +
+    D()
+    R(3)
     DEBUG(43)
     R(1)
     I(1)
@@ -144,11 +122,9 @@ def main():
     R(3)
 
     # --- Check , (44) ---
-    # Dec 1 (Total 44)
     L(1)
     D(1)
     R(1)
-    # Zero Check L(1)
     L(2)
     Z()
     L(1)
@@ -170,12 +146,10 @@ def main():
     R(1)
     D()
     C()
-    # Check Flag
     L(3)
     B()
     D()
     R(3)
-    # Action ,
     DEBUG(44)
     R(1)
     N()
@@ -185,11 +159,9 @@ def main():
     R(3)
 
     # --- Check - (45) ---
-    # Dec 1 (Total 45)
     L(1)
     D(1)
     R(1)
-    # Zero Check
     L(2)
     Z()
     L(1)
@@ -211,12 +183,10 @@ def main():
     R(1)
     D()
     C()
-    # Check Flag
     L(3)
     B()
     D()
     R(3)
-    # Action -
     DEBUG(45)
     R(1)
     D(1)
@@ -226,11 +196,9 @@ def main():
     R(3)
 
     # --- Check . (46) ---
-    # Dec 1 (Total 46)
     L(1)
     D(1)
     R(1)
-    # Zero Check
     L(2)
     Z()
     L(1)
@@ -252,12 +220,10 @@ def main():
     R(1)
     D()
     C()
-    # Check Flag
     L(3)
     B()
     D()
     R(3)
-    # Action .
     # DEBUG(46)
     R(1)
     O()
