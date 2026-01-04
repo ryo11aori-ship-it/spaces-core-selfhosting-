@@ -14,6 +14,7 @@ jobs:
       - name: Build Reference VM (Unbuffered)
         run: |
           mkdir -p bin
+          # Disable stdout buffering to see logs in real-time
           sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
