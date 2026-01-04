@@ -20,30 +20,39 @@ jobs:
       - name: Generate VM Source (Spaces)
         run: |
           mkdir -p spaces/self
-          # インデント修正版の gen_vm_bf.py を使用
           python3 tools/gen_vm_bf.py > spaces/self/vm.spaces
 
       - name: Verify VM Logic (Run directly on ref_vm)
+        id: run-vm
         run: |
           echo "Testing vm.spaces logic..."
           # Test Source: Output 'A'
           echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > test_A.bf
           
-          # 【重要】
-          # ここではコンパイルを行わず、C製VM (ref_vm) の上で
-          # Spaces製VM (vm.spaces) を動かし、その上で test_A.bf を解釈させます。
-          # これはいわゆる「インタプリタのインタプリタ」状態です。
-          # 構造: ref_vm(C) -> vm.spaces(BF) -> test_A.bf
+          # 実行 (タイムアウト120秒)
+          # タイムアウトしてもアーティファクトアップロードに進むようにする
+          timeout 120s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt || true
           
-          # ※実行速度が遅くなるためタイムアウトを延長します
-          timeout 120s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt
-          
-          echo "Output content:"
+          echo "Output content (Partial):"
           cat output.txt
           
+          # 判定ロジック
           if grep -q "A" output.txt; then
              echo "🎉 SUCCESS: VM Logic is correct!"
           else
-             echo "❌ FAILED: VM Logic mismatch."
+             echo "❌ FAILED: VM Logic mismatch or Timeout."
+             # ここで exit 1 すると upload が走らない可能性があるため、
+             # 判定結果はログに出しつつ、ステップ自体はエラーにするが
+             # 次のステップ(Upload)は if: always() で実行させる
              exit 1
           fi
+
+      - name: Upload Debug Artifacts
+        if: always() # 成功・失敗・タイムアウトに関わらず実行
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-debug-artifacts
+          path: |
+            spaces/self/vm.spaces
+            output.txt
+            test_A.bf
