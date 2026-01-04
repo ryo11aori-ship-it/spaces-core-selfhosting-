@@ -18,17 +18,22 @@ jobs:
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (Spaces)
+      # 復活させたステップ: VMのソースコードを生成
+      - name: Generate VM Source (Spaces)
         run: |
           mkdir -p spaces/self
-          # 今回作成した gen_compiler_bf.py を使用
+          python3 tools/gen_vm_bf.py > spaces/self/vm.spaces
+
+      # コンパイラのソースコードを生成
+      - name: Generate Compiler (Spaces)
+        run: |
+          # mkdir -p spaces/self (重複するので省略可だが念のためあっても良い)
           python3 tools/gen_compiler_bf.py > spaces/self/compiler.spaces
 
       - name: Compile VM using Spaces Compiler
         run: |
           echo "Compiling vm.spaces using compiler.spaces..."
-          # ref_vm runs compiler.spaces, which reads vm.spaces (ignored for now) and outputs vm.elf
-          # timeout 60s
+          # compiler.spaces (BF) を実行し、vm.spaces を入力として与え、vm.elf を出力させる
           timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/vm.spaces > vm.elf
           chmod +x vm.elf
           ls -l vm.elf
@@ -36,7 +41,7 @@ jobs:
       - name: Run Generated ELF
         run: |
           echo "Running vm.elf..."
-          # The current dummy compiler generates an ELF that just prints 'A'
+          # 現状の仮コンパイラは、入力を無視して「Aを出力するだけのELF」を生成します
           ./vm.elf > output.txt
           cat output.txt
           
@@ -54,5 +59,6 @@ jobs:
           name: compiler-artifacts
           path: |
             spaces/self/compiler.spaces
+            spaces/self/vm.spaces
             vm.elf
             output.txt
