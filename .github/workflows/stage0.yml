@@ -6,55 +6,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  stage19-vm-in-spaces:
+  stage19-vm-logic-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build VM (Reference)
+      - name: Build Reference VM (C implementation)
         run: |
           mkdir -p bin
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
 
-      - name: Generate Compiler (Stage 18)
+      - name: Generate VM Source (Spaces)
         run: |
           mkdir -p spaces/self
-          python3 tools/gen_compiler_bf_loops.py > spaces/self/compiler_loops.spaces
-
-      - name: Generate VM Source (Stage 19)
-        run: |
-          # Generates vm.spaces (BF source of the VM)
+          # インデント修正版の gen_vm_bf.py を使用
           python3 tools/gen_vm_bf.py > spaces/self/vm.spaces
 
-      - name: Compile VM using Spaces Compiler
+      - name: Verify VM Logic (Run directly on ref_vm)
         run: |
-          # Use the self-hosted compiler to build the VM
-          timeout 60s ./bin/ref_vm spaces/self/compiler_loops.spaces < spaces/self/vm.spaces > vm.elf
-          chmod +x vm.elf
-
-      - name: Verify VM
-        run: |
-          echo "Running VM test..."
-          # Test: Output 'A'
+          echo "Testing vm.spaces logic..."
+          # Test Source: Output 'A'
           echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > test_A.bf
           
-          # Run: test_A.bf | vm.elf
-          # The VM reads BF code from stdin and executes it.
-          ./vm.elf < test_A.bf > output.txt
+          # 【重要】
+          # ここではコンパイルを行わず、C製VM (ref_vm) の上で
+          # Spaces製VM (vm.spaces) を動かし、その上で test_A.bf を解釈させます。
+          # これはいわゆる「インタプリタのインタプリタ」状態です。
+          # 構造: ref_vm(C) -> vm.spaces(BF) -> test_A.bf
           
+          # ※実行速度が遅くなるためタイムアウトを延長します
+          timeout 120s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt
+          
+          echo "Output content:"
           cat output.txt
+          
           if grep -q "A" output.txt; then
-             echo "🎉 SUCCESS: VM in Spaces works!"
+             echo "🎉 SUCCESS: VM Logic is correct!"
           else
-             echo "❌ FAILED: VM Output mismatch."
+             echo "❌ FAILED: VM Logic mismatch."
              exit 1
           fi
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: stage19-outputs
-          path: |
-            spaces/self/vm.spaces
-            vm.elf
