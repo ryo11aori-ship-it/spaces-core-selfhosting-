@@ -1,3 +1,4 @@
+# (Content remains the same as previous successful run, ensuring vm.spaces step is present)
 name: Spaces Compiler CI
 
 on:
