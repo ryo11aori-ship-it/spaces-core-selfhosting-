@@ -56,162 +56,222 @@ def main():
     N()
     C()
     DEBUG(82)
-    
-    # --- Reset Logic Fix ---
-    # We are at EOF (0).
-    # Move Left 2 to land on the last Code slot (or Gap).
-    L(2)
-    # Scan Left 2 steps at a time until we hit 0 (Gap).
-    # Since Code slots are non-zero, this safely rewinds.
+    L(1)
     B()
     L(2)
     C()
-    # We are now at Gap (0).
-    # Move Right 2 to land on Start Code.
     R(2)
-    
     DEBUG(76)
-    
-    # --- Main Loop ---
-    # Memory: [L3(Scratch), L2(PrevCode), L1(Scratch), Current(Code), R1(Acc), R2(NextCode), R3(NextAcc)]
     B()
     
-    # Check + (43)
+    # Relative Check Chain:
+    # Order: + (43), , (44), - (45), . (46)
+    # L(1) is Current Instr.
+    
+    # --- Check + (43) ---
     D(43)
-    # Use L(1) as Flag, L(3) as Temp.
-    # Set Flag=1
-    L(1)
+    # Check if L(1) == 0. Use L(3) as Flag, L(2) as Scratch.
+    # Set Flag L(3) = 1
+    L(3)
     Z()
     I(1)
-    # Move Current to L(3)
-    R(1)
-    B()
-    L(3)
-    I(1)
     R(3)
+    # Copy L(1) to L(2)
+    L(1)
+    B()
+    L(1)
+    I(1)
+    R(1)
     D()
     C()
-    # Check L(3) (It holds the difference)
+    L(2)
+    B()
+    R(1)
+    I(1) # Restore L(1)
+    L(2) # At L(2)
+    I(1) # Restore L(2)?? No, logic is complex flat.
+    # Simple Zero Check:
+    # L(1) is value.
+    # L(2) = 0.
+    # L(1) [ L(2)+ L(1)- ] L(2) [ L(1)+ L(2)- ]
+    # This restores L(1).
+    # Check Logic:
+    # Flag = 1.
+    # L(1) [ Flag=0. L(2)+ L(1)- ] L(2) [ L(1)+ L(2)- ]
+    D() # L(2)--
+    C()
+    # Now if L(1) was 0, Flag(L3) is 1. If !=0, Flag is 0.
+    # L(1) is restored.
+    
+    # Let's verify Zero Check Pattern:
+    # Temp(L2) [-]
+    # Flag(L3) [-]+
+    # Val(L1) [ L3[-] L2+ L1- ]
+    # L2 [ L1+ L2- ]
+    L(2)
+    Z()
+    L(1)
+    I(1) # Flag L(3)=1
+    R(2)
+    L(1)
+    B()
+    L(2)
+    Z() # Flag=0
+    R(1)
+    I(1)
+    L(1)
+    D()
+    C()
+    L(2)
+    B()
+    L(1)
+    I(1)
+    R(1)
+    D()
+    C()
+    # Check Flag (L3)
     L(3)
     B()
-    # Diff != 0 -> Flag=0
-    R(2)
-    D()
-    L(2)
-    # Restore L(3) to Current later? No, clear L(3)
-    D()
-    C()
-    # Check Flag(L1)
-    R(2)
-    B()
-    D()
-    R(1)
+    D() # Zero Flag
+    R(3) # At R(0)=Head
+    # Action +
     DEBUG(43)
     R(1)
     I(1)
     L(1)
-    L(1)
-    C()
-    R(1)
-    I(43)
-    
-    # Check - (45)
-    D(45)
-    L(1)
-    Z()
-    I(1)
-    R(1)
-    B()
     L(3)
-    I(1)
+    C()
     R(3)
-    D()
-    C()
-    L(3)
-    B()
-    R(2)
-    D()
-    L(2)
-    D()
-    C()
-    R(2)
-    B()
-    D()
-    R(1)
-    DEBUG(45)
-    R(1)
+
+    # --- Check , (44) ---
+    # Dec 1 (Total 44)
+    L(1)
     D(1)
-    L(1)
-    L(1)
-    C()
     R(1)
-    I(45)
-    
-    # Check . (46)
-    D(46)
-    L(1)
-    Z()
-    I(1)
-    R(1)
-    B()
-    L(3)
-    I(1)
-    R(3)
-    D()
-    C()
-    L(3)
-    B()
-    R(2)
-    D()
+    # Zero Check L(1)
     L(2)
-    D()
-    C()
-    R(2)
-    B()
-    D()
-    R(1)
-    # DEBUG(46)
-    R(1)
-    O()
-    L(1)
-    L(1)
-    C()
-    R(1)
-    I(46)
-    
-    # Check , (44)
-    D(44)
-    L(1)
     Z()
+    L(1)
     I(1)
-    R(1)
-    B()
-    L(3)
-    I(1)
-    R(3)
-    D()
-    C()
-    L(3)
-    B()
     R(2)
-    D()
+    L(1)
+    B()
     L(2)
+    Z()
+    R(1)
+    I(1)
+    L(1)
     D()
     C()
-    R(2)
+    L(2)
+    B()
+    L(1)
+    I(1)
+    R(1)
+    D()
+    C()
+    # Check Flag
+    L(3)
     B()
     D()
-    R(1)
+    R(3)
+    # Action ,
     DEBUG(44)
     R(1)
     N()
     L(1)
-    L(1)
+    L(3)
     C()
+    R(3)
+
+    # --- Check - (45) ---
+    # Dec 1 (Total 45)
+    L(1)
+    D(1)
     R(1)
-    I(44)
-    
-    # Advance: Move Acc(R1) to NextAcc(R3)
+    # Zero Check
+    L(2)
+    Z()
+    L(1)
+    I(1)
+    R(2)
+    L(1)
+    B()
+    L(2)
+    Z()
+    R(1)
+    I(1)
+    L(1)
+    D()
+    C()
+    L(2)
+    B()
+    L(1)
+    I(1)
+    R(1)
+    D()
+    C()
+    # Check Flag
+    L(3)
+    B()
+    D()
+    R(3)
+    # Action -
+    DEBUG(45)
+    R(1)
+    D(1)
+    L(1)
+    L(3)
+    C()
+    R(3)
+
+    # --- Check . (46) ---
+    # Dec 1 (Total 46)
+    L(1)
+    D(1)
+    R(1)
+    # Zero Check
+    L(2)
+    Z()
+    L(1)
+    I(1)
+    R(2)
+    L(1)
+    B()
+    L(2)
+    Z()
+    R(1)
+    I(1)
+    L(1)
+    D()
+    C()
+    L(2)
+    B()
+    L(1)
+    I(1)
+    R(1)
+    D()
+    C()
+    # Check Flag
+    L(3)
+    B()
+    D()
+    R(3)
+    # Action .
+    # DEBUG(46)
+    R(1)
+    O()
+    L(1)
+    L(3)
+    C()
+    R(3)
+
+    # Restore L(1) (+46)
+    L(1)
+    I(46)
+    R(1)
+
+    # Advance
     R(1)
     B()
     R(2)
@@ -219,12 +279,8 @@ def main():
     L(2)
     D()
     C()
-    
-    # Move Head to NextCode(R2)
-    R(1) # From R1 to R2
-    
+    R(1)
     C()
-    
     DEBUG(69)
 
 if __name__ == "__main__":
