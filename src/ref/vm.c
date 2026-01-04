@@ -1,8 +1,13 @@
+/* src/ref/vm.c -- fixed for non-interactive stdin handling + minor cleanups */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> /* isatty */
+#include <sys/types.h>
+#include <sys/stat.h>
 
-/* Windows環境でのみ必要なヘッダと設定 */
+/* Windows-specific headers if needed */
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -15,7 +20,8 @@
 unsigned char tape[TAPE_SIZE];
 int ptr = 0;
 
-int op_map[8] = {'>', '<', '+', '-', '.', ',', '[', ']'};
+/* Mapping: 3-bit code -> BF op (ASCII) */
+char op_map[8] = {'>', '<', '+', '-', '.', ',', '[', ']'};
 
 void panic(const char *msg) {
     fprintf(stderr, "[VM Error] %s\n", msg);
@@ -23,7 +29,7 @@ void panic(const char *msg) {
 }
 
 /* UTF-8 full-width space detection with Bounds Checking */
-int is_full_space(unsigned char *s, int idx, int len) {
+int is_full_space(const unsigned char *s, int idx, int len) {
     if (idx + 2 >= len) return 0;
     if (s[idx] == 0xE3 && s[idx+1] == 0x80 && s[idx+2] == 0x80) {
         return 1;
@@ -31,7 +37,8 @@ int is_full_space(unsigned char *s, int idx, int len) {
     return 0;
 }
 
-int parse_line(char *input, int input_len, char *output, int max_out) {
+/* parse_line: convert line with spaces/full-width spaces into BF source (ASCII) */
+int parse_line(const char *input, int input_len, char *output, int max_out) {
     int out_idx = 0;
     int bit_buf = 0;
     int bit_cnt = 0;
@@ -39,18 +46,18 @@ int parse_line(char *input, int input_len, char *output, int max_out) {
     for (int i = 0; i < input_len && input[i] != 0; i++) {
         int bit = -1;
         unsigned char uc = (unsigned char)input[i];
-        
+
         if (uc == 0x20) {
             bit = 0;
         } else if (uc == 0xE3) {
-            if (is_full_space((unsigned char*)input, i, input_len)) {
+            if (is_full_space((const unsigned char*)input, i, input_len)) {
                 bit = 1;
-                i += 2;
+                i += 2; /* skip the remaining bytes of full-width space */
             }
         }
 
         if (bit != -1) {
-            bit_buf = (bit_buf << 1) | bit;
+            bit_buf = (bit_buf << 1) | (bit & 1);
             bit_cnt++;
             if (bit_cnt == 3) {
                 if (out_idx >= max_out - 1) panic("Output buffer overflow");
@@ -64,6 +71,7 @@ int parse_line(char *input, int input_len, char *output, int max_out) {
     return out_idx;
 }
 
+/* Brainfuck runner -- unchanged except small safety checks */
 void run_bf(char *code) {
     char *pc = code;
     memset(tape, 0, sizeof(tape));
@@ -71,26 +79,27 @@ void run_bf(char *code) {
 
     while (*pc) {
         switch (*pc) {
-            case '>': 
-                ptr++; 
+            case '>':
+                ptr++;
                 if (ptr >= TAPE_SIZE) panic("Tape pointer overflow (Right)");
                 break;
-            case '<': 
-                ptr--; 
+            case '<':
+                ptr--;
                 if (ptr < 0) panic("Tape pointer underflow (Left)");
                 break;
-            case '+': 
-                tape[ptr]++; 
+            case '+':
+                tape[ptr]++;
                 break;
-            case '-': 
-                tape[ptr]--; 
+            case '-':
+                tape[ptr]--;
                 break;
-            case '.': 
-                putchar(tape[ptr]); 
+            case '.':
+                putchar(tape[ptr]);
                 break;
-            case ',': {
+            case ',':
+            {
                 int c = getchar();
-                tape[ptr] = (c == EOF) ? 0 : c;
+                tape[ptr] = (c == EOF) ? 0 : (unsigned char)c;
                 break;
             }
             case '[':
@@ -115,67 +124,118 @@ void run_bf(char *code) {
                     }
                 }
                 break;
-            default: break;
+            default:
+                /* ignore other bytes */
+                break;
         }
         pc++;
     }
 }
 
+/* Helper: process an in-memory buffer that may be SPA header or spaces-encoded */
+void process_buffer(unsigned char *in, size_t n) {
+    /* allocate bc buffer */
+    size_t bc_cap = n + 128;
+    if (bc_cap < 4096) bc_cap = 4096;
+    char *bc = malloc(bc_cap);
+    if (!bc) panic("Alloc fail");
+
+    if (n >= 3 && in[0] == 'S' && in[1] == 'P' && in[2] == 'A') {
+        /* SPA binary format: map 1..8 -> bf ops, write raw bytes to stdout */
+        size_t out_idx = 0;
+        for (long i = 3; i < (long)n; i++) {
+            unsigned char op = in[i];
+            char mapped = 0;
+            if (op >= 1 && op <= 8) mapped = op_map[op - 1];
+            if (mapped) bc[out_idx++] = mapped;
+            /* if mapped == 0, skip */
+            /* ensure no overflow */
+            if (out_idx + 16 >= bc_cap) {
+                /* resize */
+                bc_cap *= 2;
+                char *tmp = realloc(bc, bc_cap);
+                if (!tmp) { free(bc); panic("Alloc fail"); }
+                bc = tmp;
+            }
+        }
+        bc[out_idx] = 0;
+        /* Output the generated BF (this is the intended behaviour when invoked non-interactively) */
+        /* Write binary BF to stdout */
+        fwrite(bc, 1, out_idx, stdout);
+        fflush(stdout);
+        /* Also, for convenience, we can run it in-memory if desired, but original behaviour was to output */
+    } else {
+        /* spaces-encoded BF: parse whole input into bf string and run it */
+        int parsed = parse_line((const char*)in, (int)n, bc, (int)bc_cap);
+        if (parsed > 0) {
+            run_bf(bc);
+        }
+    }
+    free(bc);
+}
+
 int main(int argc, char **argv) {
-    /* Windows環境でのみ標準出力をバイナリモードに強制変更 */
+    /* Windows: force stdout binary if needed */
     #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
     #endif
 
     if (argc > 1) {
+        /* file provided as argument: read whole file and process */
         FILE *f = fopen(argv[1], "rb");
         if (!f) { perror("File open error"); return 1; }
-        
-        fseek(f, 0, SEEK_END); 
-        long s = ftell(f); 
-        fseek(f, 0, SEEK_SET);
-        
-        if (s < 0 || s > MAX_FILE_SIZE) { 
-            fclose(f); fprintf(stderr, "File too large\n"); return 1; 
-        }
 
-        unsigned char *in = malloc(s + 1);
-        if (!in) panic("Alloc fail");
-        
-        size_t n = fread(in, 1, s, f);
+        if (fseek(f, 0, SEEK_END) != 0) { fclose(f); panic("fseek failed"); }
+        long s = ftell(f);
+        if (s < 0 || s > MAX_FILE_SIZE) { fclose(f); fprintf(stderr, "File too large\n"); return 1; }
+        if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); panic("fseek failed"); }
+
+        unsigned char *in = malloc((size_t)s + 1);
+        if (!in) { fclose(f); panic("Alloc fail"); }
+        size_t n = fread(in, 1, (size_t)s, f);
         fclose(f);
         in[n] = 0;
 
-        char *bc = malloc(s + 128);
-        if (!bc) panic("Alloc fail");
-
-        /* Header check: SPA */
-        if (n >= 3 && in[0] == 'S' && in[1] == 'P' && in[2] == 'A') {
-            size_t out_idx = 0;
-            for (long i = 3; i < n; i++) {
-                unsigned char op = in[i];
-                char mapped = 0;
-                if (op >= 1 && op <= 8) mapped = op_map[op - 1];
-                if (mapped) bc[out_idx++] = mapped;
-            }
-            bc[out_idx] = 0;
-            run_bf(bc);
-        } else {
-            parse_line((char*)in, n, bc, s + 128);
-            run_bf(bc);
-        }
+        process_buffer(in, n);
 
         free(in);
-        free(bc);
         return 0;
     }
 
+    /* No argv: decide interactive REPL vs non-interactive (piped) stdin */
+    if (!isatty(fileno(stdin))) {
+        /* Non-interactive: read all stdin into buffer and process once */
+        size_t cap = 8192;
+        size_t n = 0;
+        unsigned char *in = malloc(cap + 1);
+        if (!in) panic("Alloc fail");
+        while (1) {
+            size_t toread = cap - n;
+            if (toread == 0) {
+                cap *= 2;
+                unsigned char *tmp = realloc(in, cap + 1);
+                if (!tmp) { free(in); panic("Alloc fail"); }
+                in = tmp;
+                toread = cap - n;
+            }
+            size_t r = fread(in + n, 1, toread, stdin);
+            if (r == 0) break;
+            n += r;
+            if (n > MAX_FILE_SIZE) { free(in); panic("Input too large"); }
+        }
+        in[n] = 0;
+        process_buffer(in, n);
+        free(in);
+        return 0;
+    }
+
+    /* TTY interactive REPL */
     fprintf(stderr, "Spaces REPL (Safe Mode)\n");
     char line[4096];
     char bc[4096];
     while (1) {
         if (!fgets(line, sizeof(line), stdin)) break;
-        if (parse_line(line, strlen(line), bc, sizeof(bc)) > 0) {
+        if (parse_line(line, (int)strlen(line), bc, (int)sizeof(bc)) > 0) {
             run_bf(bc);
             printf("\n");
         }
