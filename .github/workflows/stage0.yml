@@ -14,7 +14,6 @@ jobs:
       - name: Build Reference VM (Unbuffered)
         run: |
           mkdir -p bin
-          # stdoutのバッファリングを無効化するパッチ
           sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
           gcc src/ref/vm.c -o bin/ref_vm
           chmod +x bin/ref_vm
@@ -30,7 +29,7 @@ jobs:
           echo "Testing vm.spaces logic..."
           echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > test_A.bf
           
-          # 実行 (60秒)
+          # Run with timeout
           timeout 60s ./bin/ref_vm spaces/self/vm.spaces < test_A.bf > output.txt || true
           
           echo "Output content:"
