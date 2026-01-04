@@ -1,4 +1,4 @@
-/* src/ref/vm.c -- fixed for non-interactive stdin handling + minor cleanups */
+/* src/ref/vm.c -- fixed: execute SPA->BF as interpreter instead of dumping BF text */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,17 +141,14 @@ void process_buffer(unsigned char *in, size_t n) {
     if (!bc) panic("Alloc fail");
 
     if (n >= 3 && in[0] == 'S' && in[1] == 'P' && in[2] == 'A') {
-        /* SPA binary format: map 1..8 -> bf ops, write raw bytes to stdout */
+        /* SPA binary format: map 1..8 -> bf ops */
         size_t out_idx = 0;
         for (long i = 3; i < (long)n; i++) {
             unsigned char op = in[i];
             char mapped = 0;
             if (op >= 1 && op <= 8) mapped = op_map[op - 1];
             if (mapped) bc[out_idx++] = mapped;
-            /* if mapped == 0, skip */
-            /* ensure no overflow */
             if (out_idx + 16 >= bc_cap) {
-                /* resize */
                 bc_cap *= 2;
                 char *tmp = realloc(bc, bc_cap);
                 if (!tmp) { free(bc); panic("Alloc fail"); }
@@ -159,11 +156,13 @@ void process_buffer(unsigned char *in, size_t n) {
             }
         }
         bc[out_idx] = 0;
-        /* Output the generated BF (this is the intended behaviour when invoked non-interactively) */
-        /* Write binary BF to stdout */
-        fwrite(bc, 1, out_idx, stdout);
-        fflush(stdout);
-        /* Also, for convenience, we can run it in-memory if desired, but original behaviour was to output */
+
+        /* === CRITICAL FIX ===
+           Instead of dumping BF source to stdout, we must *execute* the BF program
+           (the compiler) so it will read stdin (the code to compile) and emit bytes
+           (compiled ELF) to stdout via '.' operations. */
+        run_bf(bc);
+
     } else {
         /* spaces-encoded BF: parse whole input into bf string and run it */
         int parsed = parse_line((const char*)in, (int)n, bc, (int)bc_cap);
@@ -181,7 +180,8 @@ int main(int argc, char **argv) {
     #endif
 
     if (argc > 1) {
-        /* file provided as argument: read whole file and process */
+        /* file provided as argument: read whole file (this is the compiler BF) and execute it.
+           The compiler BF will read stdin (the source to compile) and write compiled bytes to stdout. */
         FILE *f = fopen(argv[1], "rb");
         if (!f) { perror("File open error"); return 1; }
 
@@ -196,6 +196,8 @@ int main(int argc, char **argv) {
         fclose(f);
         in[n] = 0;
 
+        /* IMPORTANT: do NOT consume stdin here. The BF compiler (run_bf) will read from stdin
+           (which in the CI invocation is the vm.spaces piped into the process). */
         process_buffer(in, n);
 
         free(in);
