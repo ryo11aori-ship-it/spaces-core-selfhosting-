@@ -12,35 +12,7 @@ jobs:
         ./seed/compiler.elf < src/compiler.spaces > compiler.elf
         chmod +x compiler.elf
 
-    - name: 2. The Provenance Proof (Closing the Loop)
-      run: |
-        echo "Hashing the initial seed (Git tracking)..."
-        SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
-        echo "Hashing the compiler built by the seed..."
-        COMPILER_HASH=$(sha256sum compiler.elf | awk '{print $1}')
-        
-        echo "Seed:     $SEED_HASH"
-        echo "Compiler: $COMPILER_HASH"
-        
-        if [ "$SEED_HASH" = "$COMPILER_HASH" ]; then
-          echo "🎉 PROVENANCE CLOSED: The seed is mathematically identical to the compiler.spaces output!"
-        else
-          echo "❌ MISMATCH: The seed contains external taint."
-          exit 1
-        fi
-
-    - name: 3. Verify Perfect Fixed Point
-      run: |
-        ./compiler.elf < src/compiler.spaces > compiler2.elf
-        chmod +x compiler2.elf
-        COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
-        if [ "$COMPILER_HASH" = "$COMPILER2_HASH" ]; then
-          echo "🎉 PERFECT MATCH: T=1 and T=2 are strictly identical."
-        else
-          exit 1
-        fi
-
-    - name: 4. Run Tests (Static Files)
+    - name: 2. Run Tests (Static Files)
       run: |
         ./compiler.elf < tests/test_A.spaces > test_A.elf
         chmod +x test_A.elf
@@ -50,3 +22,29 @@ jobs:
         chmod +x loop_test.elf
         ./loop_test.elf > output_loop.txt
         if ! grep -q "B" output_loop.txt; then exit 1; fi
+
+    - name: 3. Verify Provenance and Fixed Point
+      run: |
+        # 🚀 変数が消えないように同じステップ内で全て計算・比較する
+        ./compiler.elf < src/compiler.spaces > compiler2.elf
+        chmod +x compiler2.elf
+        
+        SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
+        COMPILER1_HASH=$(sha256sum compiler.elf | awk '{print $1}')
+        COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
+        
+        echo "Seed (C-origin):     $SEED_HASH"
+        echo "Compiler (Pure):     $COMPILER1_HASH"
+        echo "Compiler2 (Re-pure): $COMPILER2_HASH"
+        
+        if [ "$SEED_HASH" != "$COMPILER1_HASH" ]; then
+          echo "❌ PROVENANCE MISMATCH: Seed does not match generated compiler."
+          exit 1
+        fi
+        
+        if [ "$COMPILER1_HASH" != "$COMPILER2_HASH" ]; then
+          echo "❌ FIXED POINT MISMATCH: Compiler is not stable."
+          exit 1
+        fi
+        
+        echo "🎉 PERFECT MATCH: Provenance Closed and Fixed Point Stable!"
