@@ -1,44 +1,61 @@
 name: Pure Spaces CI
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
-  build:
+  purify:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: 1. Build Reference VM
+    
+    - name: 1. The Big Bang (Auto-generate Seed & Static Tests)
       run: |
-        mkdir -p bin spaces/self
-        sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
-        gcc src/ref/vm.c -o bin/ref_vm
-        chmod +x bin/ref_vm
-    - name: 2. Load Master Source (NO PYTHON GENERATOR!)
+        # シードバイナリとテストコードが存在しない場合のみ、最後の一回だけ生成してGitに永続化する
+        if [ ! -f seed/compiler.elf ]; then
+          mkdir -p seed tests bin spaces/self
+          
+          # 最後のC言語コンパイル
+          sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
+          gcc src/ref/vm.c -o bin/ref_vm
+          ./bin/ref_vm src/compiler.spaces < src/compiler.spaces > seed/compiler.elf
+          chmod +x seed/compiler.elf
+          
+          # 最後のPython生成（テストコードの静的ファイル化）
+          python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > tests/test_A.spaces
+          python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > tests/loop_test.spaces
+          
+          # Gitにコミット（これがCとPythonの「墓標」になります）
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add seed/compiler.elf tests/test_A.spaces tests/loop_test.spaces
+          git commit -m "chore: The Big Bang (Add seed binary and static tests)"
+          git push
+        fi
+
+    - name: 2. Pure Self-Hosted Compilation (NO C, NO PYTHON)
       run: |
-        # 🚀 ここが証明の核心！Pythonスクリプトは一切実行しません。
-        # リポジトリにある純粋なSpacesコードをそのままコンパイラの源流として使います。
-        cp src/compiler.spaces spaces/self/compiler.spaces
-    - name: 3. Compile Linear Code
-      run: |
-        python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
-        timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.spaces > test_A.elf
+        echo "--- Bootstrapping from Seed ---"
+        chmod +x seed/compiler.elf
+        # 🚀 C言語を一切使わず、シードバイナリからコンパイラを生成！
+        ./seed/compiler.elf < src/compiler.spaces > compiler.elf
+        chmod +x compiler.elf
+
+        echo "--- Running Tests (No Python) ---"
+        # 🚀 Pythonを一切使わず、静的ファイルからテストを実行！
+        ./compiler.elf < tests/test_A.spaces > test_A.elf
         chmod +x test_A.elf
         ./test_A.elf > output_A.txt
-        if grep -q "A" output_A.txt; then echo "🎉 SUCCESS"; else exit 1; fi
-    - name: 4. Bootstrap Self-Hosted Compiler
-      run: |
-        timeout 120s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/compiler.spaces > compiler.elf
-        chmod +x compiler.elf
-    - name: 5. Verify Pure Self-Hosted Compiler with Loop
-      run: |
-        python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > loop_test.spaces
-        ./compiler.elf < loop_test.spaces > loop_test.elf
+        if ! grep -q "A" output_A.txt; then exit 1; fi
+
+        ./compiler.elf < tests/loop_test.spaces > loop_test.elf
         chmod +x loop_test.elf
         ./loop_test.elf > output_loop.txt
-        if grep -q "B" output_loop.txt; then echo "🎉 SUCCESS"; else exit 1; fi
-    - name: 6. Verify Fixed Point
-      run: |
-        timeout 120s ./compiler.elf < spaces/self/compiler.spaces > compiler2.elf
+        if ! grep -q "B" output_loop.txt; then exit 1; fi
+
+        echo "--- Verifying Fixed Point ---"
+        ./compiler.elf < src/compiler.spaces > compiler2.elf
         chmod +x compiler2.elf
-        timeout 120s ./compiler2.elf < spaces/self/compiler.spaces > compiler3.elf
+        ./compiler2.elf < src/compiler.spaces > compiler3.elf
         chmod +x compiler3.elf
         HASH2=$(sha256sum compiler2.elf | awk '{print $1}')
         HASH3=$(sha256sum compiler3.elf | awk '{print $1}')
