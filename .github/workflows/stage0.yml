@@ -22,20 +22,24 @@ jobs:
         run: |
           mkdir -p spaces/self
           mkdir -p src
-          # 1. ピュアなBrainfuckで書かれたコンパイラのソースコードを生成
-          python3 tools/gen_bf_compiler.py > src/compiler.bf
-          # 2. それをSpaces言語にトランスパイル
-          python3 tools/bf_to_spaces.py src/compiler.bf > spaces/self/compiler.spaces
+          # 1. Spaces言語(3ビット)を読み込むコンパイラのBrainfuckソースを生成
+          python3 tools/gen_spaces_compiler_bf.py > src/compiler_spaces_reader.bf
+          
+          # 2. そのコンパイラ自身をSpaces言語にトランスパイル
+          python3 tools/bf_to_spaces.py src/compiler_spaces_reader.bf > spaces/self/compiler.spaces
 
       - name: Compile Linear Code using Spaces Compiler
         run: |
-          echo "Compiling test_A.bf using compiler.spaces..."
-          echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." > test_A.bf
+          echo "Compiling test_A.spaces using compiler.spaces..."
           
-          # ref_vm (Compiler) < test_A.bf > test_A.elf
-          timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.bf > test_A.elf
+          # "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." を Spaces言語に変換したものを用意
+          python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
+          
+          # ref_vm (Compiler) < test_A.spaces > test_A.elf
+          timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.spaces > test_A.elf
           chmod +x test_A.elf
           ls -l test_A.elf
+
 
       - name: Run Generated ELF
         run: |
