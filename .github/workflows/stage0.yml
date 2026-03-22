@@ -22,42 +22,50 @@ jobs:
         run: |
           mkdir -p spaces/self
           mkdir -p src
-          # ループとREPLの実行に対応した最強のコンパイラを生成
           python3 tools/gen_spaces_compiler_bf_bundler.py > src/compiler_spaces_reader.bf
           python3 tools/bf_to_spaces.py src/compiler_spaces_reader.bf > spaces/self/compiler.spaces
 
-      - name: Compile Linear Code using Spaces Compiler
+      - name: Compile Linear Code using Reference VM
         run: |
-          echo "Compiling test_A.spaces using compiler.spaces..."
-          
-          # "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++." を Spaces言語に変換したものを用意
+          echo "Compiling test_A.spaces using ref_vm..."
           python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
-          
-          # ref_vm (Compiler) < test_A.spaces > test_A.elf
           timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.spaces > test_A.elf
           chmod +x test_A.elf
-          ls -l test_A.elf
-
-
-      - name: Run Generated ELF
-        run: |
-          echo "Running test_A.elf..."
-          ./test_A.elf > output.txt
-          cat output.txt
-          
-          if grep -q "A" output.txt; then
-             echo "🎉 SUCCESS: Linear Compiler Logic works!"
+          ./test_A.elf > output_A.txt
+          cat output_A.txt
+          if grep -q "A" output_A.txt; then
+             echo "🎉 SUCCESS: Linear Code Works!"
           else
-             echo "❌ FAILED: ELF output mismatch."
+             echo "❌ FAILED"
              exit 1
           fi
 
-      - name: Upload Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compiler-artifacts
-          path: |
-            spaces/self/compiler.spaces
-            test_A.elf
-            output.txt
+      - name: Bootstrap Self-Hosted Compiler
+        run: |
+          echo "Bootstrapping compiler.elf (compiling compiler.spaces with ref_vm)..."
+          # C言語のVMを最後に一度だけ使い、コンパイラ自身をコンパイルしてELF化する
+          timeout 120s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/compiler.spaces > compiler.elf
+          chmod +x compiler.elf
+          ls -l compiler.elf
+
+      - name: Verify Pure Self-Hosted Compiler with Loop
+        run: |
+          echo "Compiling a Loop Test using the NEW standalone compiler.elf..."
+          # ループを使った乗算 (6 * 11 = 66 = 'B') のコードをSpacesに変換
+          python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > loop_test.spaces
+          
+          # PythonもCも一切使わず、先ほど生まれたばかりの compiler.elf でコンパイル！
+          ./compiler.elf < loop_test.spaces > loop_test.elf
+          chmod +x loop_test.elf
+          
+          # 生成されたELFを実行
+          ./loop_test.elf > output_loop.txt
+          cat output_loop.txt
+          
+          if grep -q "B" output_loop.txt; then
+             echo "🎉🎉🎉 SUCCESS: PURE SELF-HOSTING AND LOOPS ACHIEVED! 🎉🎉🎉"
+          else
+             echo "❌ FAILED"
+             exit 1
+          fi
+
