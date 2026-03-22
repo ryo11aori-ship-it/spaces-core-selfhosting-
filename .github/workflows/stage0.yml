@@ -69,3 +69,28 @@ jobs:
              exit 1
           fi
 
+      - name: Verify Fixed Point (Double Bootstrap)
+        run: |
+          echo "Stage 2: Compiling compiler.spaces using compiler.elf..."
+          timeout 120s ./compiler.elf < spaces/self/compiler.spaces > compiler2.elf
+          chmod +x compiler2.elf
+          
+          echo "Stage 3: Compiling compiler.spaces using compiler2.elf..."
+          timeout 120s ./compiler2.elf < spaces/self/compiler.spaces > compiler3.elf
+          chmod +x compiler3.elf
+          
+          echo "Comparing SHA-256 hashes of Stage 2 and Stage 3..."
+          HASH2=$(sha256sum compiler2.elf | awk '{print $1}')
+          HASH3=$(sha256sum compiler3.elf | awk '{print $1}')
+          
+          echo "compiler2.elf: $HASH2"
+          echo "compiler3.elf: $HASH3"
+          
+          if [ "$HASH2" = "$HASH3" ]; then
+             echo "🎉🎉🎉 PERFECT MATCH: Fixed point reached! The compiler is fully stable. 🎉🎉🎉"
+          else
+             echo "❌ MISMATCH: The compiler output is not stable."
+             exit 1
+          fi
+
+
