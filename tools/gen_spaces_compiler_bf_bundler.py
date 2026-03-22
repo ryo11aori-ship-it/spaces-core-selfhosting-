@@ -145,11 +145,16 @@ def main():
     pad_len = 512 - len(header_data)
     header_data += [0] * pad_len
     emit_elf_bytes_bf(header_data)
+    
     set_val(0, 0)
     set_val(1, 0)
     move_to(2)
     e(",")
     e("[")
+    
+    set_val(6, 0)
+    set_val(7, 0)
+    
     copy(2, 3, 4)
     sub_val(3, 32)
     set_val(5, 1)
@@ -166,6 +171,7 @@ def main():
     move_to(5)
     e("[-]")
     e("]")
+    
     copy(2, 3, 4)
     sub_val(3, 227)
     set_val(5, 1)
@@ -179,11 +185,20 @@ def main():
     e("[")
     set_val(6, 1)
     set_val(7, 1)
+    
+    move_to(2)
+    e("[-]")
+    e(",")
+    e("[-]")
+    e(",")
+    
     move_to(5)
     e("[-]")
     e("]")
+    
     move_to(7)
     e("[")
+    
     move_to(3)
     e("[-]")
     move_to(1)
@@ -202,6 +217,7 @@ def main():
     move_to(3)
     e("-")
     e("]")
+    
     move_to(6)
     e("[")
     move_to(1)
@@ -209,7 +225,9 @@ def main():
     move_to(6)
     e("-")
     e("]")
+    
     add_val(0, 1)
+    
     copy(0, 3, 4)
     sub_val(3, 3)
     set_val(5, 1)
@@ -221,6 +239,7 @@ def main():
     e("]")
     move_to(5)
     e("[")
+    
     copy(1, 3, 4)
     set_val(8, 1)
     move_to(3)
@@ -235,6 +254,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 1)
     set_val(8, 1)
@@ -250,6 +270,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 2)
     set_val(8, 1)
@@ -265,6 +286,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 3)
     set_val(8, 1)
@@ -280,6 +302,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 4)
     set_val(8, 1)
@@ -295,6 +318,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 5)
     set_val(8, 1)
@@ -310,6 +334,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 6)
     set_val(8, 1)
@@ -325,6 +350,7 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     copy(1, 3, 4)
     sub_val(3, 7)
     set_val(8, 1)
@@ -340,14 +366,17 @@ def main():
     move_to(8)
     e("[-]")
     e("]")
+    
     set_val(0, 0)
     set_val(1, 0)
     move_to(5)
     e("[-]")
     e("]")
+    
     move_to(7)
     e("[-]")
     e("]")
+    
     move_to(2)
     e("[-]")
     e(",")
