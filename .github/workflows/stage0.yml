@@ -48,3 +48,11 @@ jobs:
         fi
         
         echo "🎉 PERFECT MATCH: Provenance Closed and Fixed Point Stable!"
+    
+    - name: 4. Upload Artifacts (The Proof)
+      uses: actions/upload-artifact@v4
+      with:
+        name: pure-spaces-binaries
+        path: |
+          *.elf
+          output_*.txt
