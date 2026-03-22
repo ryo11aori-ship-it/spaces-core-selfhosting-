@@ -1,28 +1,21 @@
-name: Spaces Compiler CI
+name: Pure Spaces CI
 on: [push, workflow_dispatch]
-permissions:
-  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: 1. Auto-generate and Save compiler.spaces
+    - name: 1. Build Reference VM
       run: |
-        mkdir -p src spaces/self
-        python3 tools/gen_spaces_compiler_bf_bundler.py > src/compiler_spaces_reader.bf
-        python3 tools/bf_to_spaces.py src/compiler_spaces_reader.bf > src/compiler.spaces
-        cp src/compiler.spaces spaces/self/compiler.spaces
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add src/compiler.spaces
-        if ! git diff --staged --quiet; then git commit -m "feat: Save compiler.spaces as master source" && git push; fi
-    - name: 2. Build Reference VM
-      run: |
-        mkdir -p bin
+        mkdir -p bin spaces/self
         sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
         gcc src/ref/vm.c -o bin/ref_vm
         chmod +x bin/ref_vm
+    - name: 2. Load Master Source (NO PYTHON GENERATOR!)
+      run: |
+        # 🚀 ここが証明の核心！Pythonスクリプトは一切実行しません。
+        # リポジトリにある純粋なSpacesコードをそのままコンパイラの源流として使います。
+        cp src/compiler.spaces spaces/self/compiler.spaces
     - name: 3. Compile Linear Code
       run: |
         python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
