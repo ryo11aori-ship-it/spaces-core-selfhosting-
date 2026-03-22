@@ -5,12 +5,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    
     - name: 1. Bootstrap from Seed
       run: |
         chmod +x seed/compiler.elf
         ./seed/compiler.elf < src/compiler.spaces > compiler.elf
         chmod +x compiler.elf
-    - name: 2. Run Tests (Static Files)
+
+    - name: 2. The Provenance Proof (Closing the Loop)
+      run: |
+        echo "Hashing the initial seed (Git tracking)..."
+        SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
+        echo "Hashing the compiler built by the seed..."
+        COMPILER_HASH=$(sha256sum compiler.elf | awk '{print $1}')
+        
+        echo "Seed:     $SEED_HASH"
+        echo "Compiler: $COMPILER_HASH"
+        
+        if [ "$SEED_HASH" = "$COMPILER_HASH" ]; then
+          echo "🎉 PROVENANCE CLOSED: The seed is mathematically identical to the compiler.spaces output!"
+        else
+          echo "❌ MISMATCH: The seed contains external taint."
+          exit 1
+        fi
+
+    - name: 3. Verify Perfect Fixed Point
+      run: |
+        ./compiler.elf < src/compiler.spaces > compiler2.elf
+        chmod +x compiler2.elf
+        COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
+        if [ "$COMPILER_HASH" = "$COMPILER2_HASH" ]; then
+          echo "🎉 PERFECT MATCH: T=1 and T=2 are strictly identical."
+        else
+          exit 1
+        fi
+
+    - name: 4. Run Tests (Static Files)
       run: |
         ./compiler.elf < tests/test_A.spaces > test_A.elf
         chmod +x test_A.elf
@@ -20,12 +50,3 @@ jobs:
         chmod +x loop_test.elf
         ./loop_test.elf > output_loop.txt
         if ! grep -q "B" output_loop.txt; then exit 1; fi
-    - name: 3. Verify Fixed Point
-      run: |
-        ./compiler.elf < src/compiler.spaces > compiler2.elf
-        chmod +x compiler2.elf
-        ./compiler2.elf < src/compiler.spaces > compiler3.elf
-        chmod +x compiler3.elf
-        HASH2=$(sha256sum compiler2.elf | awk '{print $1}')
-        HASH3=$(sha256sum compiler3.elf | awk '{print $1}')
-        if [ "$HASH2" = "$HASH3" ]; then echo "🎉 PERFECT MATCH"; else exit 1; fi
