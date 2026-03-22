@@ -22,10 +22,8 @@ jobs:
         run: |
           mkdir -p spaces/self
           mkdir -p src
-          # 1. Spaces言語(3ビット)を読み込むコンパイラのBrainfuckソースを生成
-          python3 tools/gen_spaces_compiler_bf.py > src/compiler_spaces_reader.bf
-          
-          # 2. そのコンパイラ自身をSpaces言語にトランスパイル
+          # ループとREPLの実行に対応した最強のコンパイラを生成
+          python3 tools/gen_spaces_compiler_bf_bundler.py > src/compiler_spaces_reader.bf
           python3 tools/bf_to_spaces.py src/compiler_spaces_reader.bf > spaces/self/compiler.spaces
 
       - name: Compile Linear Code using Spaces Compiler
