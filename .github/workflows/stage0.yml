@@ -1,93 +1,52 @@
-import sys
-
-_CODE="""
-import os
-
-yaml_text = '''name: Spaces Compiler CI
-
-on:
-@@push:
-@@@@branches: [ "main", "master" ]
-@@workflow_dispatch:
-
+name: Spaces Compiler CI
+on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
-@@stage20-compiler-bootstrap:
-@@@@runs-on: ubuntu-latest
-@@@@steps:
-@@@@@@- uses: actions/checkout@v4
-
-@@@@@@- name: Build Reference VM (Unbuffered)
-@@@@@@@@run: |
-@@@@@@@@@@mkdir -p bin
-@@@@@@@@@@sed -i 's/int main(int argc, char \\*\\*argv) {/int main(int argc, char \\*\\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
-@@@@@@@@@@gcc src/ref/vm.c -o bin/ref_vm
-@@@@@@@@@@chmod +x bin/ref_vm
-
-@@@@@@- name: Prepare Compiler Source
-@@@@@@@@run: |
-@@@@@@@@@@mkdir -p spaces/self
-@@@@@@@@@@# 🚀 Python依存を完全排除！Git管理下の src/compiler.spaces を直接使用
-@@@@@@@@@@cp src/compiler.spaces spaces/self/compiler.spaces
-
-@@@@@@- name: Compile Linear Code using Reference VM
-@@@@@@@@run: |
-@@@@@@@@@@echo "Compiling test_A.spaces using ref_vm..."
-@@@@@@@@@@python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
-@@@@@@@@@@timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.spaces > test_A.elf
-@@@@@@@@@@chmod +x test_A.elf
-@@@@@@@@@@./test_A.elf > output_A.txt
-@@@@@@@@@@if grep -q "A" output_A.txt; then
-@@@@@@@@@@@@echo "🎉 SUCCESS: Linear Code Works!"
-@@@@@@@@@@else
-@@@@@@@@@@@@echo "❌ FAILED"
-@@@@@@@@@@@@exit 1
-@@@@@@@@@@fi
-
-@@@@@@- name: Bootstrap Self-Hosted Compiler
-@@@@@@@@run: |
-@@@@@@@@@@echo "Bootstrapping compiler.elf (compiling compiler.spaces with ref_vm)..."
-@@@@@@@@@@timeout 120s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/compiler.spaces > compiler.elf
-@@@@@@@@@@chmod +x compiler.elf
-
-@@@@@@- name: Verify Pure Self-Hosted Compiler with Loop
-@@@@@@@@run: |
-@@@@@@@@@@echo "Compiling a Loop Test using the NEW standalone compiler.elf..."
-@@@@@@@@@@python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > loop_test.spaces
-@@@@@@@@@@./compiler.elf < loop_test.spaces > loop_test.elf
-@@@@@@@@@@chmod +x loop_test.elf
-@@@@@@@@@@./loop_test.elf > output_loop.txt
-@@@@@@@@@@if grep -q "B" output_loop.txt; then
-@@@@@@@@@@@@echo "🎉🎉🎉 SUCCESS: PURE SELF-HOSTING AND LOOPS ACHIEVED! 🎉🎉🎉"
-@@@@@@@@@@else
-@@@@@@@@@@@@echo "❌ FAILED"
-@@@@@@@@@@@@exit 1
-@@@@@@@@@@fi
-
-@@@@@@- name: Verify Fixed Point (Double Bootstrap)
-@@@@@@@@run: |
-@@@@@@@@@@echo "Stage 2: Compiling compiler.spaces using compiler.elf..."
-@@@@@@@@@@timeout 120s ./compiler.elf < spaces/self/compiler.spaces > compiler2.elf
-@@@@@@@@@@chmod +x compiler2.elf
-@@@@@@@@@@echo "Stage 3: Compiling compiler.spaces using compiler2.elf..."
-@@@@@@@@@@timeout 120s ./compiler2.elf < spaces/self/compiler.spaces > compiler3.elf
-@@@@@@@@@@chmod +x compiler3.elf
-@@@@@@@@@@echo "Comparing SHA-256 hashes of Stage 2 and Stage 3..."
-@@@@@@@@@@HASH2=$(sha256sum compiler2.elf | awk '{print $1}')
-@@@@@@@@@@HASH3=$(sha256sum compiler3.elf | awk '{print $1}')
-@@@@@@@@@@echo "compiler2.elf: $HASH2"
-@@@@@@@@@@echo "compiler3.elf: $HASH3"
-@@@@@@@@@@if [ "$HASH2" = "$HASH3" ]; then
-@@@@@@@@@@@@echo "🎉🎉🎉 PERFECT MATCH: Fixed point reached! The compiler is fully stable. 🎉🎉🎉"
-@@@@@@@@@@else
-@@@@@@@@@@@@echo "❌ MISMATCH: The compiler output is not stable."
-@@@@@@@@@@@@exit 1
-@@@@@@@@@@fi
-'''
-
-os.makedirs('.github/workflows', exist_ok=True)
-with open('.github/workflows/stage0.yml', 'w', encoding='utf-8') as f:
-^f.write(yaml_text.replace('@@', '  '))
-print("Generated new stage0.yml successfully.")
-"""
-
-exec(_CODE.replace("^", "    "))
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: 1. Auto-generate and Save compiler.spaces
+      run: |
+        mkdir -p src spaces/self
+        python3 tools/gen_spaces_compiler_bf_bundler.py > src/compiler_spaces_reader.bf
+        python3 tools/bf_to_spaces.py src/compiler_spaces_reader.bf > src/compiler.spaces
+        cp src/compiler.spaces spaces/self/compiler.spaces
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add src/compiler.spaces
+        if ! git diff --staged --quiet; then git commit -m "feat: Save compiler.spaces as master source" && git push; fi
+    - name: 2. Build Reference VM
+      run: |
+        mkdir -p bin
+        sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
+        gcc src/ref/vm.c -o bin/ref_vm
+        chmod +x bin/ref_vm
+    - name: 3. Compile Linear Code
+      run: |
+        python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > test_A.spaces
+        timeout 60s ./bin/ref_vm spaces/self/compiler.spaces < test_A.spaces > test_A.elf
+        chmod +x test_A.elf
+        ./test_A.elf > output_A.txt
+        if grep -q "A" output_A.txt; then echo "🎉 SUCCESS"; else exit 1; fi
+    - name: 4. Bootstrap Self-Hosted Compiler
+      run: |
+        timeout 120s ./bin/ref_vm spaces/self/compiler.spaces < spaces/self/compiler.spaces > compiler.elf
+        chmod +x compiler.elf
+    - name: 5. Verify Pure Self-Hosted Compiler with Loop
+      run: |
+        python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > loop_test.spaces
+        ./compiler.elf < loop_test.spaces > loop_test.elf
+        chmod +x loop_test.elf
+        ./loop_test.elf > output_loop.txt
+        if grep -q "B" output_loop.txt; then echo "🎉 SUCCESS"; else exit 1; fi
+    - name: 6. Verify Fixed Point
+      run: |
+        timeout 120s ./compiler.elf < spaces/self/compiler.spaces > compiler2.elf
+        chmod +x compiler2.elf
+        timeout 120s ./compiler2.elf < spaces/self/compiler.spaces > compiler3.elf
+        chmod +x compiler3.elf
+        HASH2=$(sha256sum compiler2.elf | awk '{print $1}')
+        HASH3=$(sha256sum compiler3.elf | awk '{print $1}')
+        if [ "$HASH2" = "$HASH3" ]; then echo "🎉 PERFECT MATCH"; else exit 1; fi
