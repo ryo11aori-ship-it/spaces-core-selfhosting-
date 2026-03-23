@@ -106,8 +106,9 @@ jobs:
             ops.append("+" * random.randint(5, 15))
             ops.append("[")
             ops.append(">" + "+" * random.randint(1, 5))
-            ops.append("[>+>+<<-]>>[<<+>>-]<") # Nested payload
-            ops.append("<-]")
+            # 🚀 修正: ポインタが確実に元の位置(0)に戻るように、<<< で帳尻を合わせた
+            ops.append("[>+>+<<-]>>[<<+>>-]")
+            ops.append("<<<-]")
             ops.append(">.")
             with open(f"tests/fuzz_{i}.bf", "w") as f:
                 f.write("".join(ops))
@@ -158,13 +159,11 @@ jobs:
         echo "=== Runtime Seccomp Enforcement ==="
         cat << 'EOF' > tools/seccomp_wrapper.py
         import os, sys, seccomp
-        # Initialize filter with default action KILL
         filt = seccomp.SyscallFilter(defaction=seccomp.KILL)
-        # Strictly whitelist ONLY write, exit, and exit_group
         filt.add_rule(seccomp.ALLOW, "write")
         filt.add_rule(seccomp.ALLOW, "exit")
         filt.add_rule(seccomp.ALLOW, "exit_group")
-        filt.add_rule(seccomp.ALLOW, "execve") # Required to start the process
+        filt.add_rule(seccomp.ALLOW, "execve")
         filt.load()
         os.execl(sys.argv[1], sys.argv[1])
         EOF
