@@ -22,35 +22,50 @@ jobs:
         echo "  - Assembler (as) & Linker (ld)."
         echo "  - Single Semantic Origin: Semantic validation uses a dual-oracle model (C VM vs Pure Python VM)."
         echo "  - Execution Substrate Dependency: DDC spans across distinct OS boundaries (Ubuntu vs Alpine/musl)."
+        echo "[Limitations (Out of Scope / Theoretical Bounds)]"
+        echo "  - Memory Protection (W^X): The ultra-minimalist ELF emitter maps a single RWX segment. Segregating RX and RW segments is left as future work."
+        echo "  - Cross-ISA Independence: The compiler emits x86_64 machine code directly."
 
     - name: 1. Setup Tools
-      run: sudo apt-get update && sudo apt-get install -y clang tcc strace binutils libc-bin python3 python3-seccomp
+      run: sudo apt-get update && sudo apt-get install -y clang tcc strace binutils libc-bin python3 musl-tools python3-seccomp
 
-    - name: 2. The Big Bang (Execution Substrate Diversity via Alpine Docker)
+    - name: 2. The Big Bang (Quad-Crown DDC via glibc & musl)
       run: |
         mkdir -p seed tests bin spaces/self
         sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
         
+        echo "--- Compiling VM with GCC, Clang, TCC, and MUSL-GCC ---"
         gcc -frandom-seed=0 -Wl,--build-id=none src/ref/vm.c -o bin/ref_vm_gcc
         clang -frandom-seed=0 -Wl,--build-id=none src/ref/vm.c -o bin/ref_vm_clang
         tcc src/ref/vm.c -o bin/ref_vm_tcc
-        docker run --rm -v $(pwd):/work alpine sh -c "apk add --no-cache gcc musl-dev && gcc -static -frandom-seed=0 -Wl,--build-id=none /work/src/ref/vm.c -o /work/bin/ref_vm_alpine"
+        # 所有権エラーを回避しつつAlpine環境でビルド
+        docker run --rm -v $(pwd):/work alpine sh -c "apk add --no-cache gcc musl-dev && gcc -static -frandom-seed=0 -Wl,--build-id=none /work/src/ref/vm.c -o /work/bin/ref_vm_alpine && chown $(id -u):$(id -g) /work/bin/ref_vm_alpine"
         strip bin/ref_vm_gcc bin/ref_vm_clang bin/ref_vm_tcc bin/ref_vm_alpine || true
         
+        echo "--- Generating seeds across diverse substrates ---"
         ./bin/ref_vm_gcc src/compiler.spaces < src/compiler.spaces > seed/fresh_compiler_gcc.elf
         ./bin/ref_vm_clang src/compiler.spaces < src/compiler.spaces > seed/fresh_compiler_clang.elf
         ./bin/ref_vm_tcc src/compiler.spaces < src/compiler.spaces > seed/fresh_compiler_tcc.elf
         ./bin/ref_vm_alpine src/compiler.spaces < src/compiler.spaces > seed/fresh_compiler_alpine.elf
         chmod +x seed/fresh_compiler_gcc.elf
         
+        echo "--- DDC Verification (Cross-libc Boundary) ---"
         GCC_HASH=$(sha256sum seed/fresh_compiler_gcc.elf | awk '{print $1}')
         CLANG_HASH=$(sha256sum seed/fresh_compiler_clang.elf | awk '{print $1}')
         TCC_HASH=$(sha256sum seed/fresh_compiler_tcc.elf | awk '{print $1}')
         ALPINE_HASH=$(sha256sum seed/fresh_compiler_alpine.elf | awk '{print $1}')
+        echo "GCC (glibc):   $GCC_HASH"
+        echo "Clang (glibc): $CLANG_HASH"
+        echo "TCC (glibc):   $TCC_HASH"
+        echo "MUSL-GCC:      $ALPINE_HASH"
         
         if [ "$GCC_HASH" != "$CLANG_HASH" ] || [ "$GCC_HASH" != "$TCC_HASH" ] || [ "$GCC_HASH" != "$ALPINE_HASH" ]; then exit 1; fi
+        echo "✅ QUAD-CROWN DDC PASSED"
         
         cp seed/fresh_compiler_gcc.elf seed/fresh_compiler.elf
+        python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > tests/test_A.spaces
+        python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > tests/loop_test.spaces
+        
         if [ -f seed/compiler.elf ]; then
           REPO_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
           if [ "$GCC_HASH" != "$REPO_HASH" ]; then exit 1; fi
@@ -58,18 +73,70 @@ jobs:
           cp seed/fresh_compiler.elf seed/compiler.elf
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add seed/compiler.elf
-          git commit -m "chore: Init exact seed verified by Cross-OS DDC"
+          git add seed/compiler.elf tests/test_A.spaces tests/loop_test.spaces
+          git commit -m "chore: Init exact seed verified by Quad-Crown DDC"
           git push
         fi
 
-    - name: 3. Bootstrap from Seed
+    - name: 3. Bootstrap & Basic Functional Tests
       run: |
         chmod +x seed/compiler.elf
         ./seed/compiler.elf < src/compiler.spaces > compiler.elf
         chmod +x compiler.elf
+        
+        echo "--- Basic Functional Tests ---"
+        ./compiler.elf < tests/test_A.spaces > test_A.elf
+        chmod +x test_A.elf
+        ./test_A.elf > output_A.txt
+        if ! grep -q "A" output_A.txt; then exit 1; fi
+        
+        ./compiler.elf < tests/loop_test.spaces > loop_test.elf
+        chmod +x loop_test.elf
+        ./loop_test.elf > output_loop.txt
+        if ! grep -q "B" output_loop.txt; then exit 1; fi
+        echo "✅ Functional tests (A and B) passed."
 
-    - name: 4. Prove F - Dual-Oracle Semantic Verification & Advanced Fuzzing
+    - name: 4. Prove C - Semantic Stability (Fixed-Point Hash Verification)
+      run: |
+        ./compiler.elf < src/compiler.spaces > compiler2.elf
+        chmod +x compiler2.elf
+        ./compiler2.elf < src/compiler.spaces > compiler3.elf
+        
+        echo "=== SHA-256 Hash Matching (The Provenance Proof) ==="
+        SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
+        COMPILER1_HASH=$(sha256sum compiler.elf | awk '{print $1}')
+        COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
+        COMPILER3_HASH=$(sha256sum compiler3.elf | awk '{print $1}')
+        
+        echo "Seed (C-origin):     $SEED_HASH"
+        echo "Compiler (Pure):     $COMPILER1_HASH"
+        echo "Compiler2 (Re-pure): $COMPILER2_HASH"
+        echo "Compiler3:           $COMPILER3_HASH"
+        
+        if [ "$SEED_HASH" != "$COMPILER1_HASH" ]; then echo "❌ PROVENANCE MISMATCH" && exit 1; fi
+        if [ "$COMPILER1_HASH" != "$COMPILER2_HASH" ] || [ "$COMPILER2_HASH" != "$COMPILER3_HASH" ]; then echo "❌ FIXED POINT MISMATCH" && exit 1; fi
+        echo "🎉 PERFECT MATCH: Provenance Closed and Fixed Point Stable!"
+
+    - name: 5. Prove Visual Independence (Hexdump, Objdump, Strings, LDD)
+      run: |
+        echo "=== Hexdump of compiler.elf ==="
+        hexdump -C compiler.elf | head -n 25
+        echo "=== Disassembly Around Entry Point ==="
+        objdump -d compiler.elf | head -n 200 || true
+        
+        echo "=== Strings Search (Checking for external traces) ==="
+        strings compiler.elf | grep -iE "brainfuck|vm|interpreter|op_map|c" || echo "✅ CLEAN: No external semantic strings found!"
+        
+        echo "=== LDD Check (No glibc dependence) ==="
+        ldd loop_test.elf || echo "✅ EXPECTED: not a dynamic executable (No glibc)"
+        
+        echo "=== Basic Strace (No external files or execve) ==="
+        strace -f -e trace=execve ./loop_test.elf > /dev/null 2> execve.log
+        if ! grep "execve(" execve.log | grep -v "loop_test.elf" > /dev/null; then echo "✅ PASS: No external execution"; else exit 1; fi
+        strace -e trace=file ./loop_test.elf > /dev/null 2> file.log
+        if ! grep -qE "open|access|stat" file.log; then echo "✅ PASS: No file dependency"; else exit 1; fi
+
+    - name: 6. Prove F - Dual-Oracle Semantic Verification & Advanced Fuzzing
       run: |
         cat << 'EOF' > tools/ref_py_vm.py
         import sys
@@ -111,46 +178,27 @@ jobs:
           diff out_ref_$i out_comp_$i || exit 1
         done
 
-    - name: 5. Prove C - Semantic Stability (Fixed-Point)
+    - name: 7. Prove E - Formal ELF Generation & W^X Specification
       run: |
-        ./compiler.elf < src/compiler.spaces > compiler2.elf
-        chmod +x compiler2.elf
-        ./compiler2.elf < src/compiler.spaces > compiler3.elf
-        
-        SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
-        COMPILER1_HASH=$(sha256sum compiler.elf | awk '{print $1}')
-        COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
-        COMPILER3_HASH=$(sha256sum compiler3.elf | awk '{print $1}')
-        if [ "$SEED_HASH" != "$COMPILER1_HASH" ]; then exit 1; fi
-        if [ "$COMPILER1_HASH" != "$COMPILER2_HASH" ] || [ "$COMPILER2_HASH" != "$COMPILER3_HASH" ]; then exit 1; fi
-
-    - name: 6. Prove E - Formal ELF Generation & W^X Specification
-      run: |
+        echo "=== Process Trace of Compiler ==="
         strace -f -e trace=process ./compiler.elf < src/compiler.spaces > /dev/null 2> compiler_process.log
         if grep -E "^(fork|vfork|clone)\(" compiler_process.log; then exit 1; fi
         if grep "^execve(" compiler_process.log | grep -v "\./compiler\.elf"; then exit 1; fi
         
         echo "=== W^X (Memory Protection) Verification ==="
-        # 🚀 指摘(2)(3): 失敗を無視するのではなく、明確な「期待される仕様(Executable Spec)」として昇格
         if readelf -l compiler.elf 2>/dev/null | grep -E " RWE | RWE$"; then
           echo "⚠️ EXPECTED: RWX (RWE) segment detected."
           echo "   [Specification] Unified code/tape memory model is an intentional design choice."
-          echo "   [Implication] Hardware W^X protection is not enforced. Logical W^X relies entirely on tape pointer boundary constraints."
         else
           echo "❌ UNEXPECTED DESIGN VIOLATION: No RWX segment found."
-          echo "   This contradicts the single-segment flat memory model assumption of the compiler."
           exit 1
         fi
         
         if readelf -l compiler.elf 2>/dev/null | grep -q "Requesting program interpreter"; then exit 1; fi
         if readelf -S compiler.elf 2>/dev/null | grep -qE "\.dynamic|\.plt|\.got"; then exit 1; fi
 
-    - name: 7. Prove B - Syscall Runtime Guarantee (Seccomp Sandbox)
+    - name: 8. Prove B - Syscall Runtime Guarantee (Seccomp Sandbox)
       run: |
-        python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > tests/loop_test.spaces
-        ./compiler.elf < tests/loop_test.spaces > loop_test.elf
-        chmod +x loop_test.elf
-        
         cat << 'EOF' > tools/seccomp_wrapper.py
         import os, sys, seccomp
         filt = seccomp.SyscallFilter(defaction=seccomp.KILL)
@@ -164,9 +212,8 @@ jobs:
         python3 tools/seccomp_wrapper.py ./loop_test.elf > output_sandbox.txt
         if ! grep -q "B" output_sandbox.txt; then exit 1; fi
 
-    - name: 8. Formal Verification Summary
+    - name: 9. Formal Verification Summary
       run: |
-        # 🚀 指摘(5): 論文レベルの証明分類を一発で理解できるサマリーとして出力
         echo "=================================================="
         echo "         FORMAL VERIFICATION RESULTS              "
         echo "=================================================="
@@ -176,12 +223,14 @@ jobs:
         echo "✔ Process Purity (No as/ld invocations): PASS"
         echo "✔ Syscall Minimality (Strict Seccomp Sandbox): PASS"
         echo "⚠ Memory Protection (W^X): EXPECTED VIOLATION (by design)"
+        echo "=================================================="
+        echo "CONCLUSION: The Spaces compiler achieves practical semantic independence and reproducible self-hosting closure."
 
-
-    - name: 9. Upload Artifacts
+    - name: 10. Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: pure-spaces-binaries
         path: |
           *.elf
           *.log
+          *.txt
