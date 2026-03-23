@@ -3,13 +3,31 @@ on: [push, workflow_dispatch]
 jobs:
   build_and_prove:
     runs-on: ubuntu-latest
+    # 🚀 指摘(C): 再現可能ビルド(Reproducible Build)を強制するためのグローバル環境変数
+    env:
+      SOURCE_DATE_EPOCH: 0
+      LC_ALL: C
+      TZ: UTC
+    
     steps:
     - uses: actions/checkout@v4
 
-    - name: 0. Setup Tools
+    - name: 0. Define Formal Threat Model & TCB (Trusted Computing Base)
+      run: |
+        echo "=== FORMAL ASSUMPTION & THREAT MODEL ==="
+        echo "To establish formal language independence, we explicitly define our Trusted Computing Base (TCB):"
+        echo "[Assumed Benign (Out of Scope for this proof)]"
+        echo "  - Hardware architecture and microcode."
+        echo "  - The Linux x86_64 Kernel and its syscall ABI."
+        echo "  - The underlying OS toolchain (binutils, libc)."
+        echo "[Threat Model Addressed]"
+        echo "  - Trusting-Trust attacks residing within a specific C compiler (e.g., GCC)."
+        echo "  - Non-deterministic semantic injection during the bootstrap phase."
+
+    - name: 1. Setup Tools
       run: sudo apt-get update && sudo apt-get install -y clang tcc strace binutils libc-bin
 
-    - name: 1. The Big Bang (Triple-Crown DDC & Strict Provenance)
+    - name: 2. The Big Bang (Triple-Crown DDC & Strict Provenance)
       run: |
         mkdir -p seed tests bin spaces/self
         sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
@@ -44,8 +62,9 @@ jobs:
           exit 1
         fi
         
-        echo "✅ TRIPLE-CROWN DDC PASSED: GCC, Clang, and TCC produced identical binaries."
-        echo "✅ Trusting Trust risk mathematically eliminated via disjoint compiler lineages."
+        # 🚀 指摘(5): アカデミックに正確な推奨表現への変更
+        echo "✅ TRIPLE-CROWN DDC PASSED: No discrepancies observed across multiple independent compiler implementations."
+        echo "✅ Trusting Trust risk significantly reduced (not eliminated), assuming an uncompromised shared OS/ABI ecosystem."
         
         cp seed/fresh_compiler_gcc.elf seed/fresh_compiler.elf
         
@@ -69,7 +88,7 @@ jobs:
           git push
         fi
 
-    - name: 2. Bootstrap from Seed & Compile All
+    - name: 3. Bootstrap from Seed & Compile All
       run: |
         chmod +x seed/compiler.elf
         ./seed/compiler.elf < src/compiler.spaces > compiler.elf
@@ -83,7 +102,7 @@ jobs:
         ./compiler.elf < tests/loop_test.spaces > loop_test.elf
         chmod +x loop_test.elf
 
-    - name: 3. Run Functional Tests
+    - name: 4. Run Functional Tests
       run: |
         ./test_A.elf > output_A.txt
         if ! grep -q "A" output_A.txt; then exit 1; fi
@@ -91,72 +110,38 @@ jobs:
         if ! grep -q "B" output_loop.txt; then exit 1; fi
         echo "✅ Functional tests passed."
 
-    - name: 4. Prove C - Provenance and Fixed Point Check
+    - name: 5. Prove C - Provenance and Fixed Point Check
       run: |
         SEED_HASH=$(sha256sum seed/compiler.elf | awk '{print $1}')
         COMPILER1_HASH=$(sha256sum compiler.elf | awk '{print $1}')
         COMPILER2_HASH=$(sha256sum compiler2.elf | awk '{print $1}')
         COMPILER3_HASH=$(sha256sum compiler3.elf | awk '{print $1}')
         
-        echo "Seed (C-origin):     $SEED_HASH"
-        echo "Compiler (Pure):     $COMPILER1_HASH"
-        echo "Compiler2 (Re-pure): $COMPILER2_HASH"
-        echo "Compiler3:           $COMPILER3_HASH"
-        
-        if [ "$SEED_HASH" != "$COMPILER1_HASH" ]; then
-          echo "❌ PROVENANCE MISMATCH: Seed does not match generated compiler."
-          exit 1
-        fi
-        if [ "$COMPILER1_HASH" != "$COMPILER2_HASH" ] || [ "$COMPILER2_HASH" != "$COMPILER3_HASH" ]; then
-          echo "❌ FIXED POINT MISMATCH: Compiler is not stable."
-          exit 1
-        fi
+        if [ "$SEED_HASH" != "$COMPILER1_HASH" ]; then exit 1; fi
+        if [ "$COMPILER1_HASH" != "$COMPILER2_HASH" ] || [ "$COMPILER2_HASH" != "$COMPILER3_HASH" ]; then exit 1; fi
         echo "🎉 PERFECT MATCH: Provenance Closed and Fixed Point Stable!"
 
-    - name: 5. Prove A - Internal Semantics (Machine Code & Entry Point)
+    - name: 6. Prove A - Internal Semantics (Machine Code & Entry Point)
       run: |
-        echo "=== Hexdump of compiler.elf ==="
         hexdump -C compiler.elf | head -n 25
-        echo "=== Objdump of compiler.elf (Binary mode) ==="
         objdump -D -b binary -m i386:x86-64 compiler.elf | head -n 60 || true
-        echo "=== Disassembly Around Entry Point ==="
         objdump -d compiler.elf | head -n 200 || true
 
-    - name: 6. Prove B - External VM Non-Dependence (Strict strace Assertions)
+    - name: 7. Prove B - External VM Non-Dependence (Strict strace Assertions)
       run: |
-        echo "=== ldd loop_test.elf ==="
         ldd loop_test.elf || echo "✅ EXPECTED: not a dynamic executable (No glibc)"
-        
-        echo "=== Strict strace 1: No external program execution ==="
         strace -f -e trace=execve ./loop_test.elf > /dev/null 2> execve.log
-        cat execve.log
-        if grep "execve(" execve.log | grep -v "loop_test.elf" > /dev/null; then
-          echo "❌ FAILED: External execution detected"
-          exit 1
-        else
-          echo "✅ PASS: No external execution"
-        fi
-        
-        echo "=== Strict strace 2: No file access ==="
+        if grep "execve(" execve.log | grep -v "loop_test.elf" > /dev/null; then exit 1; fi
         strace -e trace=file ./loop_test.elf > /dev/null 2> file.log
-        cat file.log
-        if grep -qE "open|access|stat" file.log; then
-          echo "❌ FAILED: File access detected"
-          exit 1
-        else
-          echo "✅ PASS: No file dependency"
-        fi
-        
-        echo "=== Full strace of loop_test.elf ==="
+        if grep -qE "open|access|stat" file.log; then exit 1; fi
         strace ./loop_test.elf > output_loop.txt 2> strace.log
         cat strace.log
 
-    - name: 7. Prove D - No Trace of External Design (strings)
+    - name: 8. Prove D - No Trace of External Design (strings)
       run: |
-        echo "=== strings compiler.elf ==="
         strings compiler.elf | grep -iE "brainfuck|vm|interpreter|op_map|c" || echo "✅ CLEAN: No external semantic strings found!"
 
-    - name: 8. Upload Artifacts (The Proof)
+    - name: 9. Upload Artifacts (The Proof)
       uses: actions/upload-artifact@v4
       with:
         name: pure-spaces-binaries
