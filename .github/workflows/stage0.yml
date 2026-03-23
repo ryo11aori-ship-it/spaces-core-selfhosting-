@@ -88,16 +88,15 @@ jobs:
             for _ in range(15):
                 ops.append("+" * random.randint(1, 15))
                 ops.append(".")
-                ops.append(">" * random.randint(0, 3))
-                ops.append("+" * random.randint(0, 5))
-                ops.append("<" * random.randint(0, 3))
+                ops.append(">") # テープのアンダーフロー(左端突き抜け)を防ぐため必ず右に進む
             with open(f"tests/rand_{i}.bf", "w") as f:
                 f.write("".join(ops))
         EOF
         python3 tools/gen_rand_bf.py
         
         for i in $(seq 0 9); do
-          python3 tools/bf_to_spaces.py < tests/rand_$i.bf > tests/rand_$i.spaces
+          # 🚀 修正: < (標準入力) ではなく引数として渡す
+          python3 tools/bf_to_spaces.py tests/rand_$i.bf > tests/rand_$i.spaces
           ./bin/ref_vm_gcc src/compiler.spaces < tests/rand_$i.spaces > ref_$i.elf
           chmod +x ref_$i.elf
           ./ref_$i.elf > out_ref_$i
@@ -125,7 +124,6 @@ jobs:
         echo "=== Process Trace of Compiler ==="
         strace -f -e trace=process ./compiler.elf < src/compiler.spaces > /dev/null 2> compiler_process.log
         cat compiler_process.log
-        # 🚀 外部ツール (as/ld) の起動プロセス (execve, fork, clone) が一切ないことを厳密にAssert
         if grep -E "^(fork|vfork|clone)\(" compiler_process.log; then echo "❌ FAILED: fork/clone detected" && exit 1; fi
         if grep "^execve(" compiler_process.log | grep -v "\./compiler\.elf"; then echo "❌ FAILED: External execve detected" && exit 1; fi
         echo "✅ VERIFIED: The compiler process does not invoke any external tools (as/ld). Pure direct emission."
@@ -142,7 +140,6 @@ jobs:
         echo "=== Strict Syscall Whitelist Verification ==="
         strace -f -e trace=all ./loop_test.elf > /dev/null 2> syscalls.log
         cat syscalls.log
-        # 🚀 Linux x86_64 の最小安定Syscall集合 (execve, read, write, exit, exit_group) のみに制限するWhitelist検証
         if grep -E "^[a-z_]+\(" syscalls.log | grep -vE "^(execve|read|write|exit|exit_group)\("; then
           echo "❌ FAILED: Unauthorized syscalls detected! Syscall surface is not minimal."
           exit 1
