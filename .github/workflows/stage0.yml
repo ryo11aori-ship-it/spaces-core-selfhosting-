@@ -5,6 +5,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: 0. The Big Bang Strict Provenance
+      run: |
+        mkdir -p seed tests bin spaces/self
+        sed -i 's/int main(int argc, char \*\*argv) {/int main(int argc, char \*\*argv) { setbuf(stdout, NULL);/' src/ref/vm.c
+        gcc src/ref/vm.c -o bin/ref_vm
+        ./bin/ref_vm src/compiler.spaces < src/compiler.spaces > seed/fresh_compiler.elf
+        chmod +x seed/fresh_compiler.elf
+        python3 tools/bf_to_spaces.py <(echo "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++.") > tests/test_A.spaces
+        python3 tools/bf_to_spaces.py <(echo "++++++[>+++++++++++<-]>.") > tests/loop_test.spaces
+        if [ -f seed/compiler.elf ]; then
+        FRESH=$(sha256sum seed/fresh_compiler.elf | awk '{print $1}')
+        REPO=$(sha256sum seed/compiler.elf | awk '{print $1}')
+        if [ "$FRESH" != "$REPO" ]; then
+        echo "PROVENANCE ERROR: Repo binary differs from fresh source build!"
+        exit 1
+        fi
+        else
+        cp seed/fresh_compiler.elf seed/compiler.elf
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add seed/compiler.elf tests/test_A.spaces tests/loop_test.spaces
+        git commit -m "chore: Init exact seed"
+        git push
+        fi
 
     - name: 1. Setup Tools
       run: sudo apt-get update && sudo apt-get install -y strace binutils libc-bin
@@ -103,4 +127,3 @@ jobs:
         path: |
           *.elf
           output_*.txt
-          *.log
