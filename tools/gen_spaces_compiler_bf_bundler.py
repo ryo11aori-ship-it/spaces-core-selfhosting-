@@ -114,3 +114,4 @@ def build_parser():
     move_to(1); e("[-],"); e("]")
 
 if __name__ == "__main__":
+    build_parser()
