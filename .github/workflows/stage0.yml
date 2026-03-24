@@ -218,4 +218,5 @@ jobs:
         path: |
           *.elf
           *.log
+          *.txt
 
