@@ -219,4 +219,9 @@ jobs:
           *.elf
           *.log
           *.txt
+          *.spaces
+          *.bf
+          *.c
+          *.py
+          *.exe
 
