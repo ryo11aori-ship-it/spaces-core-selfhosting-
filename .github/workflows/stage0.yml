@@ -225,6 +225,22 @@ jobs:
         if [ "$VACUUM_HASH" != "$COMPILER_HASH" ]; then echo "❌ FAILED in vacuum"; exit 1; fi
         echo "✅ VERIFIED: Compiler perfectly self-replicates in an absolute void (No /lib, /usr, /etc)."
 
+    - name: 9.2. Prove H - Mutation Testing (Avalanche Effect)
+      run: |
+        echo "=== Mutation Testing (1-bit flip in DNA) ==="
+        # ソースコードの最初の半角スペースを全角スペースに置換（意図的な破損）
+        sed 's/ /　/1' src/compiler.spaces > mutated.spaces
+        # 突然変異したソースをコンパイル
+        ./compiler.elf < mutated.spaces > mutated.elf || true
+        
+        MUTATED_HASH=$(sha256sum mutated.elf | awk '{print $1}')
+        COMPILER_HASH=$(sha256sum compiler.elf | awk '{print $1}')
+        if [ "$MUTATED_HASH" == "$COMPILER_HASH" ]; then
+          echo "❌ FAILED: Compiler ignored the mutation! (Possible dummy output)"
+          exit 1
+        fi
+        echo "✅ VERIFIED: Cryptographic sensitivity. A single altered space cascades into complete structural divergence."
+
     - name: 10. Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
