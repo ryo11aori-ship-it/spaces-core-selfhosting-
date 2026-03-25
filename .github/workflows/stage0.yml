@@ -210,6 +210,20 @@ jobs:
         echo "✔ Runtime W^X Enforcement (mmap/mprotect): PASS"
         echo "=================================================="
         echo "CONCLUSION: The Spaces compiler achieves practical semantic independence, reproducible self-hosting closure, and strict W^X memory safety."
+    
+    - name: 9.1. Prove G - The Absolute Vacuum (Chroot Isolation)
+      run: |
+        echo "=== Running Compiler in a Total Filesystem Vacuum ==="
+        mkdir -p empty_world
+        cp compiler.elf empty_world/
+        # 完全な空ディレクトリをルート(/)に見立てて隔離実行
+        sudo chroot empty_world /compiler.elf < src/compiler.spaces > empty_world_out.elf
+        chmod +x empty_world_out.elf
+        
+        VACUUM_HASH=$(sha256sum empty_world_out.elf | awk '{print $1}')
+        COMPILER_HASH=$(sha256sum compiler.elf | awk '{print $1}')
+        if [ "$VACUUM_HASH" != "$COMPILER_HASH" ]; then echo "❌ FAILED in vacuum"; exit 1; fi
+        echo "✅ VERIFIED: Compiler perfectly self-replicates in an absolute void (No /lib, /usr, /etc)."
 
     - name: 10. Upload Artifacts
       uses: actions/upload-artifact@v4
