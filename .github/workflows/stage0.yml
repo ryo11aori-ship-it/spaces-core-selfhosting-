@@ -236,7 +236,7 @@ jobs:
         MUTATED_HASH=$(sha256sum mutated.elf | awk '{print $1}')
         COMPILER_HASH=$(sha256sum compiler.elf | awk '{print $1}')
         if [ "$MUTATED_HASH" == "$COMPILER_HASH" ]; then
-          echo "❌ FAILED: Compiler ignored the mutation! (Possible dummy output)"
+          echo "❌ FAILED: Compiler ignored the mutation (Possible dummy output)"
           exit 1
         fi
         echo "✅ VERIFIED: Cryptographic sensitivity. A single altered space cascades into complete structural divergence."
